@@ -1,0 +1,31 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# CDK
+cdk.out/
+.cdk.staging/
+**/cdk.out/
+**/.cdk.staging/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Local Claude context (contains personal AWS account ID, SSO session, IAM role ARN)
+CLAUDE.md
+
+# Logs
+*.log

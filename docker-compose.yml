@@ -1,0 +1,41 @@
+# Toolchain containers. Nothing runs on the host except Docker and the AWS CLI.
+# See docs/adr/0001-architecture-and-decisions.md — Decision 4 for rationale.
+#
+# Invocation patterns:
+#   docker compose run --rm build gradle :api:shadowJar         # build the Lambda shaded JAR
+#   docker compose run --rm build gradle :cdk:run --args synth  # synthesize CloudFormation
+#   docker compose run --rm cdk cdk deploy --all                # deploy to AWS
+#   docker compose run --rm cdk cdk destroy --all               # tear down
+#
+# Optional services (load testing, local Lambda RIE) are gated behind Compose profiles
+# and added in later modules — see docs/adr/0001-architecture-and-decisions.md.
+
+services:
+
+  build:
+    image: gradle:8-jdk21
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - gradle-cache:/home/gradle/.gradle
+    user: gradle
+
+  cdk:
+    build:
+      context: .
+      dockerfile: docker/cdk.Dockerfile
+    image: lra-cdk:2.1118.2
+    working_dir: /workspace/cdk
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.aws:/root/.aws:ro
+      - gradle-cache:/root/.gradle
+    environment:
+      - CDK_DEFAULT_ACCOUNT=${AWS_ACCOUNT_ID}
+      - CDK_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - AWS_PROFILE=${AWS_PROFILE:-lambda-resilience}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+
+volumes:
+  gradle-cache:
