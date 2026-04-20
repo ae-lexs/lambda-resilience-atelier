@@ -1,0 +1,12 @@
+{
+  "app": "../gradlew :cdk:run -q --no-daemon --console=plain",
+  "watch": {
+    "include": ["src/main/**/*.java", "build.gradle.kts"],
+    "exclude": ["build", "cdk.out"]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/core:target-partitions": ["aws", "aws-cn"]
+  }
+}

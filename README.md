@@ -65,21 +65,29 @@ New CDK stacks land in `cdk/src/main/java/com/example/infra/stacks/` and are wir
 ## Typical Workflow
 
 ```bash
+# Inspect the Gradle multi-project layout
+docker compose run --rm build ./gradlew projects
+
 # Build the Lambda shaded JAR (produces api/build/libs/api.jar)
-docker compose run --rm build gradle :api:shadowJar --no-daemon
+docker compose run --rm build ./gradlew :api:shadowJar --no-daemon
 
 # Synthesize the CDK app (produces cdk/cdk.out/)
-docker compose run --rm build gradle :cdk:run --args synth --no-daemon
+docker compose run --rm cdk cdk synth
 
-# Deploy a specific stack
-docker compose run --rm cdk cdk deploy BaselineStack
+# Diff against the deployed stack
+docker compose run --rm cdk cdk diff
 
-# Tail CloudWatch logs from the host
-aws logs tail /aws/lambda/lra-baseline --follow --profile lambda-resilience
+# Deploy
+docker compose run --rm cdk cdk deploy LraBaselineStack --require-approval never
+
+# Tail CloudWatch logs from the host (needs AWS_PROFILE set or --profile)
+aws logs tail /aws/lambda/lra-baseline --follow --profile "$AWS_PROFILE"
 
 # Tear down
-docker compose run --rm cdk cdk destroy --all
+docker compose run --rm cdk cdk destroy --all --force
 ```
+
+**CDK version note.** The `aws-cdk` npm CLI and the `aws-cdk-lib` Java library track independent version schemes in CDK v2. This repo pins CLI `2.1118.2` (in `docker/cdk.Dockerfile`) and library `2.250.0` (in `cdk/build.gradle.kts`). Wire compatibility between the two is governed by the cloud assembly schema, which is stable across current versions.
 
 ---
 
