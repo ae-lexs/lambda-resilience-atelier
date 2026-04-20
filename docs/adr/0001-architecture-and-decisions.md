@@ -148,6 +148,16 @@ flowchart TD
 - **Bad:** Gradle's incremental build cache is not preserved between container invocations by default — first build per session is always a full build. Mitigated by mounting a Gradle cache volume in `docker-compose.yml`.
 - **Rejected — Bazel:** Designed for large hermetic monorepos (Google, Uber, Twitter) where distributed caching across thousands of targets justifies the overhead. Adds BUILD files, WORKSPACE configuration, and custom Lambda packaging rules with no benefit at the scope of this codelab. Spring Boot and Lambda packaging support in Bazel is community-maintained, not first-class.
 
+**Shadow packaging — non-obvious requirements for Spring Boot + aws-serverless-java-container:**
+
+Lambda requires a single flat fat JAR, not Spring Boot's nested-JAR loader format, so we use `com.gradleup.shadow:8.3.0` instead of `spring-boot-maven-plugin` / `bootJar`. Shadow's default merge strategies silently drop entries that Spring Boot and `aws-serverless-java-container-springboot3` depend on. Three transformations are mandatory:
+
+1. **`mergeServiceFiles()`** — for `META-INF/services/*` (ServiceLoader SPI).
+2. **`PropertiesFileTransformer` with `mergeStrategy = "append"` for `META-INF/spring.factories`** — without this, the default last-one-wins merge drops Spring Boot's `org.springframework.boot.ApplicationContextFactory` entry (the one that maps `WebApplicationType.SERVLET` to `AnnotationConfigServletWebServerApplicationContext`). The symptom is a cryptic `ClassCastException` at `SpringBootLambdaContainerHandler.initialize:200` — Spring Boot falls back to a non-web context because no factory is registered for SERVLET. See [GradleUp/shadow#899](https://github.com/GradleUp/shadow/issues/899), [aws/serverless-java-container#904](https://github.com/aws/serverless-java-container/issues/904).
+3. **Explicit `append(...)` for every Spring Boot `META-INF/spring/*.imports`** — Spring Boot autoconfiguration discovery reads these files; a merge that drops entries causes specific autoconfigurations to silently not run. When bumping Spring Boot, verify the append list against the new `spring-boot-autoconfigure` JAR.
+
+A belt-and-suspenders mitigation that sidesteps Spring Boot's classpath probe entirely is to set `spring.main.web-application-type=servlet` in `api/src/main/resources/application.properties`. This is committed in the baseline module alongside the Shadow transformations; removing either is unsafe.
+
 ---
 
 ### Decision 3: Infrastructure Tool
@@ -495,3 +505,4 @@ Always destroy in this sequence to stop billing as early as possible:
 | v1.0 | April 2026 | Initial document. System architecture diagram, local development architecture, tech stack decisions with rationale, module dependency map, and annotated cost model. |
 | v2.0 | April 2026 | Restructured as ADR (MADR format). Each decision now has explicit context, considered options table, trade-offs, and rejected alternatives with rationale. Added Decision 7 (Lambda → database authentication) with full two-hop RDS Proxy mechanism, IAM token lineage from EC2 instance profiles, and Secrets Manager pattern relationship. Adopted MADR format. |
 | v2.1 | April 2026 | Reconciled Decision 6 VPC endpoint cost model: Module 01 baseline deploys only the CloudWatch Logs endpoint ($0.02/hr), with Secrets Manager added in Module 05 ($0.04/hr). Per-session cost table updated accordingly for Modules 01 and 03. No decision reversed. |
+| v2.2 | April 2026 | Added "Shadow packaging — non-obvious requirements" section to Decision 2, documenting the mandatory `PropertiesFileTransformer` for `META-INF/spring.factories` and the `application.properties` web-application-type override. Captured during Module 01 debugging to prevent repeating the same failure in Modules 03+. No decision reversed. |
