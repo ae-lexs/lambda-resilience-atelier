@@ -7,6 +7,8 @@ import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.apigatewayv2.HttpApi;
 import software.amazon.awscdk.aws_apigatewayv2_integrations.HttpLambdaIntegration;
+import software.amazon.awscdk.aws_apigatewayv2_integrations.HttpLambdaIntegrationProps;
+import software.amazon.awscdk.services.apigatewayv2.PayloadFormatVersion;
 import software.amazon.awscdk.services.ec2.InterfaceVpcEndpointAwsService;
 import software.amazon.awscdk.services.ec2.InterfaceVpcEndpointOptions;
 import software.amazon.awscdk.services.ec2.IpAddresses;
@@ -71,8 +73,15 @@ public class BaselineStack extends Stack {
             .loggingFormat(LoggingFormat.TEXT)
             .build();
 
-        HttpLambdaIntegration integration =
-            new HttpLambdaIntegration("LambdaIntegration", lambdaFn);
+        // API Gateway HTTP API payload format v1.0 — matches what `SpringDelegatingLambda-
+        // ContainerHandler` reads (`AwsProxyRequest`). The library's v2.0 handler factory
+        // is not exercised by any official AWS sample and has known init-time issues.
+        HttpLambdaIntegration integration = new HttpLambdaIntegration(
+            "LambdaIntegration",
+            lambdaFn,
+            HttpLambdaIntegrationProps.builder()
+                .payloadFormatVersion(PayloadFormatVersion.VERSION_1_0)
+                .build());
 
         HttpApi httpApi = HttpApi.Builder.create(this, "HttpApi")
             .apiName("lra-baseline-api")
