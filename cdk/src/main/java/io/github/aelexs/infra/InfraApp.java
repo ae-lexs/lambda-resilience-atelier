@@ -1,35 +1,48 @@
 package io.github.aelexs.infra;
 
 import io.github.aelexs.infra.stacks.BaselineStack;
+import io.github.aelexs.infra.stacks.ObservabilityStack;
 import software.amazon.awscdk.App;
 import software.amazon.awscdk.Environment;
 import software.amazon.awscdk.StackProps;
 
 public final class InfraApp {
 
-    private InfraApp() {
-        // Single-entry-point CDK application; not instantiated.
-    }
+    private InfraApp() {}
 
     public static void main(final String[] args) {
         App app = new App();
 
-        StackProps.Builder propsBuilder = StackProps.builder()
-            .description("Lambda Resilience Atelier — Module 01 baseline (Spring Boot Lambda + HTTP API + PRIVATE_ISOLATED VPC).");
-
-        // Bind to a concrete AWS environment only when both are set. Leaving the stack
-        // environment-agnostic lets `cdk synth` run in CI or locally without credentials
-        // while `cdk deploy` still pins the real account/region from .env.
         String account = System.getenv("CDK_DEFAULT_ACCOUNT");
-        String region = System.getenv("CDK_DEFAULT_REGION");
+        String region  = System.getenv("CDK_DEFAULT_REGION");
+
+        StackProps baselineProps;
+        StackProps observabilityProps;
+
         if (isSet(account) && isSet(region)) {
-            propsBuilder.env(Environment.builder()
+            Environment env = Environment.builder()
                 .account(account)
                 .region(region)
-                .build());
+                .build();
+            baselineProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 01 baseline.")
+                .env(env)
+                .build();
+            observabilityProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 02 observability (ADOT + X-Ray).")
+                .env(env)
+                .build();
+        } else {
+            baselineProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 01 baseline.")
+                .build();
+            observabilityProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 02 observability (ADOT + X-Ray).")
+                .build();
         }
 
-        new BaselineStack(app, "LraBaselineStack", propsBuilder.build());
+        new BaselineStack(app, "LraBaselineStack", baselineProps);
+        new ObservabilityStack(app, "LraObservabilityStack", observabilityProps);
 
         app.synth();
     }
