@@ -24,6 +24,9 @@ dependencies {
         exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
     }
     implementation("com.amazonaws.serverless:aws-serverless-java-container-springboot3:2.1.5")
+
+    // CRaC API — Coordinated Restore at Checkpoint
+    implementation("org.crac:crac:1.5.0")
 }
 
 tasks.shadowJar {

@@ -2,6 +2,7 @@ package io.github.aelexs.infra;
 
 import io.github.aelexs.infra.stacks.BaselineStack;
 import io.github.aelexs.infra.stacks.ObservabilityStack;
+import io.github.aelexs.infra.stacks.SnapStartStack;
 import software.amazon.awscdk.App;
 import software.amazon.awscdk.Environment;
 import software.amazon.awscdk.StackProps;
@@ -18,6 +19,7 @@ public final class InfraApp {
 
         StackProps baselineProps;
         StackProps observabilityProps;
+        StackProps snapStartProps;
 
         if (isSet(account) && isSet(region)) {
             Environment env = Environment.builder()
@@ -32,6 +34,10 @@ public final class InfraApp {
                 .description("Lambda Resilience Atelier — Module 02 observability (ADOT + X-Ray).")
                 .env(env)
                 .build();
+            snapStartProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 03 snapstart.")
+                .env(env)
+                .build();
         } else {
             baselineProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 01 baseline.")
@@ -39,10 +45,14 @@ public final class InfraApp {
             observabilityProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 02 observability (ADOT + X-Ray).")
                 .build();
+            snapStartProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 03 snapstart.")
+                .build();
         }
 
         new BaselineStack(app, "LraBaselineStack", baselineProps);
         new ObservabilityStack(app, "LraObservabilityStack", observabilityProps);
+        new SnapStartStack(app, "LraSnapStartStack", snapStartProps);
 
         app.synth();
     }
