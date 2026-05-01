@@ -3,6 +3,8 @@ package io.github.aelexs.infra;
 import io.github.aelexs.infra.stacks.BaselineStack;
 import io.github.aelexs.infra.stacks.ObservabilityStack;
 import io.github.aelexs.infra.stacks.SnapStartStack;
+import io.github.aelexs.infra.stacks.ProvisionedConcurrencyStack;
+
 import software.amazon.awscdk.App;
 import software.amazon.awscdk.Environment;
 import software.amazon.awscdk.StackProps;
@@ -20,6 +22,7 @@ public final class InfraApp {
         StackProps baselineProps;
         StackProps observabilityProps;
         StackProps snapStartProps;
+        StackProps provisionedConcurrencyProps;
 
         if (isSet(account) && isSet(region)) {
             Environment env = Environment.builder()
@@ -38,6 +41,10 @@ public final class InfraApp {
                 .description("Lambda Resilience Atelier — Module 03 snapstart.")
                 .env(env)
                 .build();
+            provisionedConcurrencyProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 04 provisioned concurrency.")
+                .env(env)
+                .build();
         } else {
             baselineProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 01 baseline.")
@@ -48,11 +55,15 @@ public final class InfraApp {
             snapStartProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 03 snapstart.")
                 .build();
+            provisionedConcurrencyProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 04 provisioned concurrency.")
+                .build();
         }
 
         new BaselineStack(app, "LraBaselineStack", baselineProps);
         new ObservabilityStack(app, "LraObservabilityStack", observabilityProps);
         new SnapStartStack(app, "LraSnapStartStack", snapStartProps);
+        new ProvisionedConcurrencyStack(app, "LraProvisionedConcurrencyStack", provisionedConcurrencyProps);
 
         app.synth();
     }
