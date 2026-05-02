@@ -27,6 +27,20 @@ dependencies {
 
     // CRaC API — Coordinated Restore at Checkpoint
     implementation("org.crac:crac:1.5.0")
+
+    // JDBC + HikariCP (HikariCP is bundled with spring-boot-starter-jdbc).
+    // Version pinned to match `spring-boot-starter-web:3.5.0` above. The
+    // project does not use the `io.spring.dependency-management` plugin or
+    // a Spring Boot BOM, so every Spring Boot starter needs an explicit
+    // version on its declaration.
+    implementation("org.springframework.boot:spring-boot-starter-jdbc:3.5.0")
+
+    // PostgreSQL JDBC driver
+    runtimeOnly("org.postgresql:postgresql:42.7.4")
+
+    // AWS SDK v2 — RDS module includes RdsUtilities for IAM auth token generation.
+    // Use 2.x 'rds' artifact (not the deprecated v1 sdk-java).
+    implementation("software.amazon.awssdk:rds:2.28.0")
 }
 
 tasks.shadowJar {
