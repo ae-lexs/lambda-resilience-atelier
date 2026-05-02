@@ -36,6 +36,14 @@ services:
       - CDK_DEFAULT_REGION=${AWS_REGION:-us-east-1}
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-us-east-1}
+  k6:
+    image: grafana/k6
+    profiles: ["loadtest"]
+    working_dir: /loadtest
+    volumes:
+      - ./loadtest:/loadtest:ro
+    environment:
+      - API_URL=${API_URL}
 
 volumes:
   gradle-cache:

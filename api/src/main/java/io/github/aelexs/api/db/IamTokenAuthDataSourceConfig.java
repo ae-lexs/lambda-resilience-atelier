@@ -2,6 +2,7 @@ package io.github.aelexs.api.db;
 
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,8 +51,22 @@ import java.sql.SQLException;
  * connection is created. Module 03's InvokePrimingResource pattern is
  * for JIT priming, which still applies; the database lifecycle is
  * separately framework-managed plus this token-refresh hook.
+ *
+ * @ConditionalOnProperty gates the entire bean on DB_PROXY_ENDPOINT
+ * being set. The api/ JAR is shared across every module's stack —
+ * Modules 01–10 deploy the same artifact with different infrastructure
+ * around it. Only Module 05+ stacks define DB_PROXY_ENDPOINT. Without
+ * this gate, Modules 01–04 stacks fail to deploy because Spring Boot's
+ * context refresh hits an unresolvable @Value placeholder
+ * (PlaceholderResolutionException). On Module 04 specifically, the
+ * symptom is CFN reporting "Provisioned Concurrency configuration
+ * failed to be applied" on the LiveAlias — CFN hides the real cause;
+ * diagnosis requires tailing the Lambda's log group. The same rule
+ * applies to DbController below, and to any future bean that
+ * @Value-injects a stack-specific env var with no default.
  */
 @Configuration
+@ConditionalOnProperty(name = "DB_PROXY_ENDPOINT")
 public class IamTokenAuthDataSourceConfig {
 
     private final String dbProxyEndpoint;

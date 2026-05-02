@@ -190,10 +190,21 @@ public class DatabaseResilienceStack extends Stack {
             .environment(Map.of(
                 "AWS_LAMBDA_EXEC_WRAPPER", "/opt/otel-handler",
                 "OTEL_SERVICE_NAME", "lra-database-resilience",
-                // NEW: DB connection environment for HikariCP
+                // NEW: DB connection environment for HikariCP. The presence
+                // of DB_PROXY_ENDPOINT is the activation signal for
+                // IamTokenAuthDataSourceConfig and DbController on the
+                // application side (both gated by @ConditionalOnProperty).
+                // Earlier modules' stacks that omit this var keep the
+                // shared api/ JAR deployable without DB wiring.
                 "DB_PROXY_ENDPOINT", proxy.getEndpoint(),
                 "DB_NAME", "lra",
-                "DB_USER", "postgres"
+                "DB_USER", "postgres",
+                // Opts this stack into Spring Boot's SQL init (schema.sql +
+                // data.sql). application.properties reads the value via
+                // ${SPRING_SQL_INIT_MODE:never}; without this entry the
+                // default "never" applies and SQL init is skipped — the
+                // mode that earlier modules' stacks rely on.
+                "SPRING_SQL_INIT_MODE", "always"
             ))
             .build();
 
