@@ -1,6 +1,7 @@
 package io.github.aelexs.infra;
 
 import io.github.aelexs.infra.stacks.BaselineStack;
+import io.github.aelexs.infra.stacks.DatabaseResilienceStack;
 import io.github.aelexs.infra.stacks.ObservabilityStack;
 import io.github.aelexs.infra.stacks.SnapStartStack;
 import io.github.aelexs.infra.stacks.ProvisionedConcurrencyStack;
@@ -23,6 +24,8 @@ public final class InfraApp {
         StackProps observabilityProps;
         StackProps snapStartProps;
         StackProps provisionedConcurrencyProps;
+        StackProps databaseResilienceProps;
+
 
         if (isSet(account) && isSet(region)) {
             Environment env = Environment.builder()
@@ -45,6 +48,10 @@ public final class InfraApp {
                 .description("Lambda Resilience Atelier — Module 04 provisioned concurrency.")
                 .env(env)
                 .build();
+            databaseResilienceProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 05 database resilience.")
+                .env(env)
+                .build();
         } else {
             baselineProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 01 baseline.")
@@ -58,12 +65,16 @@ public final class InfraApp {
             provisionedConcurrencyProps = StackProps.builder()
                 .description("Lambda Resilience Atelier — Module 04 provisioned concurrency.")
                 .build();
+            databaseResilienceProps = StackProps.builder()
+                .description("Lambda Resilience Atelier — Module 05 database resilience.")
+                .build();
         }
 
         new BaselineStack(app, "LraBaselineStack", baselineProps);
         new ObservabilityStack(app, "LraObservabilityStack", observabilityProps);
         new SnapStartStack(app, "LraSnapStartStack", snapStartProps);
         new ProvisionedConcurrencyStack(app, "LraProvisionedConcurrencyStack", provisionedConcurrencyProps);
+        new DatabaseResilienceStack(app, "LraDatabaseResilienceStack", databaseResilienceProps);
 
         app.synth();
     }
