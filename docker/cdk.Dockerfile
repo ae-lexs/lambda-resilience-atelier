@@ -1,4 +1,4 @@
-# Image combining JDK 21 (to synthesize the CDK Java app) and Node.js 20 (to run
+# Image combining JDK 21 (to synthesize the CDK Java app) and Node.js 22 (to run
 # the aws-cdk CLI). Built once, reused across all deploy/destroy/diff operations.
 #
 # Base: eclipse-temurin:21-jdk-jammy — Docker Official Image published by the Eclipse
@@ -11,7 +11,7 @@
 FROM eclipse-temurin:21-jdk-jammy
 
 ARG AWS_CDK_VERSION=2.1118.2
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends \

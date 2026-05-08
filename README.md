@@ -49,7 +49,7 @@ lambda-resilience-atelier/
 ├── api/                         # Spring Boot 3.x Lambda (REST API)
 ├── cdk/                         # AWS CDK v2 Java — App.java + stacks/ + constructs/
 ├── docker/
-│   └── cdk.Dockerfile           # JDK 21 + Node 20 + aws-cdk CLI
+│   └── cdk.Dockerfile           # JDK 21 + Node 22 + aws-cdk CLI
 ├── docker-compose.yml           # build + cdk services
 ├── .env.example
 ├── docs/
