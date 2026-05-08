@@ -1,5 +1,5 @@
 # Toolchain containers. Nothing runs on the host except Docker and the AWS CLI.
-# See docs/adr/0001-architecture-and-decisions.md — Decision 4 for rationale.
+# See README.md — Decisions table, row 4 for rationale.
 #
 # Invocation patterns:
 #   docker compose run --rm build gradle :api:shadowJar         # build the Lambda shaded JAR
@@ -8,7 +8,7 @@
 #   docker compose run --rm cdk cdk destroy --all               # tear down
 #
 # Optional services (load testing, local Lambda RIE) are gated behind Compose profiles
-# and added in later modules — see docs/adr/0001-architecture-and-decisions.md.
+# and added in later modules — see README.md.
 
 services:
 

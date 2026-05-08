@@ -6,7 +6,7 @@
 # repackage. Node.js is layered on top via the NodeSource APT repository so the CLI
 # version stays pinned.
 #
-# Pinned versions match docs/adr/0001-architecture-and-decisions.md Decisions 1, 3, 4.
+# Pinned versions match README.md Decisions table rows 1, 3, 4.
 
 FROM eclipse-temurin:21-jdk-jammy
 
