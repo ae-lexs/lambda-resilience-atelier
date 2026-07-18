@@ -1,39 +1,65 @@
 # Lambda Resilience Atelier
 
-_Architecture, Decisions, and Findings · v3.1 · May 2026_
+**An empirical study of Java Lambda cold-start failure modes and their mitigations.**
 
-> **Cold starts are a fail-slow failure mode for Java Lambdas** — slow but recoverable, visible to users at the moment of greatest demand, and addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be measured rather than assumed.
+_v4.0 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
 
-This is the canonical and only documentation for the repository. It captures the architectural decisions made before the codelab was implemented, the empirical findings produced by running each module on real AWS infrastructure, and a synthesis of six cross-cutting takeaways. The code in this repository is the implementation; the companion `constellational_atelier` Obsidian vault is the long-form curriculum (one document per module); this document is the conclusion.
-
----
-
-## Status
-
-**Final — May 2026.** The codelab is complete through Module 08 (CI/CD). Modules 09 (local development) and 10 (consolidated teardown) were dropped from v1.0 scope: Lambda RIE does not reproduce Firecracker cold start and therefore contributes nothing to the thesis, and per-module teardown sections make a consolidated teardown document redundant.
+> **Thesis.** Cold start is a **fail-slow** failure mode for Java Lambdas — slow but recoverable, invisible in steady-state benchmarks, and worst at the moment of greatest demand. It is addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be **measured, not assumed**. This repository is the apparatus and the measurements that test that claim end to end.
 
 ---
 
-## Thesis
+## Table of contents
 
-The atelier tested the fail-slow framing empirically across eight modules: M01 establishes the baseline; M02–M04 build the mitigation hierarchy (observability → SnapStart → Provisioned Concurrency); M05 covers the parallel concurrency failure mode (database connection exhaustion); M06–M07 verify the system holds under burst load and deliberate failure injection; M08 gates every future change operationally. The findings below are the receipts.
-
----
-
-## Context
-
-The codelab was scoped to satisfy four constraints that are in tension:
-
-1. **Didactic fidelity** — the experiments must make cold start anatomy, concurrent initialization pressure, connection exhaustion, and chaos behavior visible as observable phenomena in a dashboard, not just asserted in prose.
-2. **Public accessibility** — any AWS practitioner must be able to run the codelab from a clean machine. Toolchain friction is a first-class failure mode.
-3. **Cost discipline** — resources must be destroyable after each module. Total cost across all modules must stay under $5.
-4. **Production relevance** — the architecture must reflect decisions a practitioner would actually face in a real Java Lambda workload, not a contrived example.
-
-Each decision below documents how a specific tension was resolved. Each finding documents what the resolution actually delivered when run against real AWS infrastructure.
+1. [Abstract](#1-abstract)
+2. [Claims under test](#2-claims-under-test) — the citation surface
+3. [Apparatus and method](#3-apparatus-and-method)
+4. [Experiments and findings](#4-experiments-and-findings)
+5. [Synthesis — six takeaways](#5-synthesis--six-takeaways)
+6. [Design decisions](#6-design-decisions)
+7. [Reproduce it yourself](#7-reproduce-it-yourself)
+8. [How to cite](#8-how-to-cite)
+9. [References](#9-references) · [License](#license) · [Changelog](#changelog)
 
 ---
 
-## System Architecture
+## 1. Abstract
+
+This is an **empirical study**, not a tutorial and not an opinion piece. Its unit of work is the *pre-registered experiment*: before any infrastructure was deployed, expected behavior was committed to a prospective architecture-and-decisions document (§6); the experiments were then run against real AWS infrastructure in `us-east-1`; and each load-bearing claim carries a **measured verdict** against that expectation.
+
+Verdicts use three labels:
+
+- **Confirmed** — the measurement matched the prediction.
+- **Nuanced** — the direction held but the magnitude, cost, or boundary conditions differ materially from the naive expectation.
+- **Corrected** — the measurement contradicted the prevailing assumption. *This is the highest-value outcome*: it is the reason to run the experiment instead of paraphrasing the documentation.
+
+Of the eight claims tested, **five are Corrected** — a reminder that the received wisdom about Java Lambda cold start (that it can be estimated from the runtime, that observability is free, that one latency threshold captures resilience) does not survive contact with a dashboard.
+
+The study spans eight modules: M01 establishes a baseline; M02–M04 build the mitigation hierarchy (observability → SnapStart → Provisioned Concurrency); M05 covers the parallel failure mode of database connection exhaustion; M06–M07 verify behavior under burst load and deliberate fault injection; M08 gates every future change operationally. The empirical findings in §4 are the receipts.
+
+---
+
+## 2. Claims under test
+
+Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follow the link for the experiment, the instrument, the measured number, and the reasoning behind the verdict.
+
+| ID | Claim under test | Prevailing assumption / prediction | Measured result | Verdict |
+|---|---|---|---|---|
+| [LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime) | A Java Lambda's cold start can be estimated from JVM + framework version | 1.3–2.2 s (committed in §6) | **4,623 ms** | **Corrected** |
+| [LRA-02](#lra-02--observability-is-not-free) | Distributed-tracing instrumentation is effectively free | Negligible overhead | **+4,200 ms** cold start, **+131 MB** | **Corrected** |
+| [LRA-03](#lra-03--snapstart-is-the-cheap-but-incomplete-default) | SnapStart restores a Java Lambda in the low hundreds of ms | Sub-second restore | 737 ms warm · **1,703 ms** first cache-cold | **Nuanced** |
+| [LRA-04](#lra-04--provisioned-concurrency-is-the-deterministic-eliminator) | Provisioned Concurrency eliminates cold start under burst | Eliminated, at a standing cost | Eliminated under 0→500 VU · **$0.72/day** | **Confirmed** |
+| [LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling) | A right-sized function cannot fail on a downstream limit | Compute sizing is the whole story | Aurora **≈188-conn** ceiling at 1 ACU saturates instantly | **Confirmed** + mechanism |
+| [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) | A single-invocation benchmark represents production latency | Representative | p95 **110 ms** vs max **24,690 ms** (**224×**) | **Corrected** |
+| [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience) | One latency SLA threshold captures resilience | Sufficient | Latency and error injection hit **different** metrics | **Corrected** |
+| [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) | ADOT and FIS can instrument the same function | They coexist | Exec-wrapper slot is **mutually exclusive** | **Corrected** |
+
+---
+
+## 3. Apparatus and method
+
+### System under test
+
+The deployed system is the *union* of all eight modules; each composes additively onto the previous. M01 establishes Lambda + VPC + API Gateway; M02 attaches the ADOT layer; M03 enables SnapStart; M04 attaches Provisioned Concurrency; M05 adds RDS Proxy + Aurora; M06–M07 are observation regimes (no new infrastructure); M08 wires CI/CD. The CDK app exposes **one stack per module**, so any module can be deployed and torn down independently.
 
 ```mermaid
 flowchart LR
@@ -74,52 +100,40 @@ flowchart LR
     FIS -.->|"injection"| Lambda
 ```
 
-The deployed system is the *union* of all eight modules. Each module composes additively onto the previous: M01 establishes Lambda + VPC + API Gateway; M02 attaches the ADOT layer; M03 enables SnapStart; M04 attaches Provisioned Concurrency; M05 adds RDS Proxy + Aurora; M06–M07 are observation regimes (no infrastructure); M08 wires CI/CD. Modules can be deployed and torn down independently — the CDK app exposes one stack per module.
+### Instruments — how each number was measured
+
+The measurement method is the load-bearing part of the study; a number without an instrument is an assertion. Every finding in §4 names the instrument that produced it.
+
+| Instrument | Measures | Note on fidelity |
+|---|---|---|
+| **CloudWatch Logs Insights** over `REPORT` / `INIT_REPORT` / `RESTORE_REPORT` lines | `@initDuration`, `Restore Duration`, `Billed Restore Duration`, warm `@duration` | `InitDuration` is a **log field, never a CloudWatch metric**. `@restoreDuration` auto-parse is unreliable — parse the raw `@message` instead. |
+| **ADOT Lambda layer → Grafana Cloud** | p50/p95/p99 invocation duration, concurrent executions, error rate, PC utilization/spillover | CloudWatch panels require **Match Exact = on**, or metric search returns duplicate function-level + account-level series. |
+| **CloudWatch metrics** (`AWS/Lambda`, `AWS/RDS`) | `ProvisionedConcurrencyUtilization`, `ProvisionedConcurrencySpilloverInvocations`, Aurora `ServerlessDatabaseCapacity`, `DatabaseConnections` | 60 s resolution — adequate here because the effects persist for minutes, not seconds. |
+| **k6 `stages` API** | throughput, p95/max latency, `http_req_failed`, `checks` under a controlled `0→500`-VU burst | Multi-threshold (`p(95)<500ms`, `http_req_failed<1%`, `checks>95%`) — different thresholds catch different failure modes (see [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience)). |
+| **AWS FIS Lambda actions** | system behavior under injected latency (`invocation-add-delay`) and errors (`invocation-error`) | Extension is **not** auto-injected; requires deploy-time prerequisites — and forecloses ADOT on the same function ([LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function)). |
 
 ---
 
-## Decisions
+## 4. Experiments and findings
 
-The full prospective rationale (Context · Considered Options · Trade-offs · Rejected) lives in the companion atelier's `00-architecture-and-decisions.md`. The compact summary below pairs each decision with its principal rejected alternative and — where the consequence only emerged during implementation — a post-hoc note flagging the cost.
+Cold-start budget across modules. Every number is a direct measurement from `us-east-1`, not an estimate.
 
-| # | Decision | Choice | Principal rejected alternative | Post-hoc consequence |
-|---|---|---|---|---|
-| 1 | Runtime + framework | Java 21 + Spring Boot 3.5 | Quarkus native (eliminates SnapStart's didactic value) | M01 cold start landed at 4.6 s vs. predicted 1.3–2.2 s; root cause: `spring-cloud-function-serverless-web` transitive deps from `aws-serverless-java-container-springboot3:2.1.5` |
-| 2 | Build tool | Gradle 8 + `com.gradleup.shadow:8.3.0` | Bazel (scope mismatch); Maven (host install) | Three Shadow transformations are mandatory: `mergeServiceFiles()`, `PropertiesFileTransformer` on `spring.factories`, `append()` on `spring/*.imports` |
-| 3 | Infra-as-code | AWS CDK v2 (Java) — CLI `2.1118.2`, lib `2.250.0` | Terraform (HCL context switch); SAM (YAML-only ceiling) | CDK CLI requires Node.js; container needs `/var/run/docker.sock` mount for asset bundling |
-| 4 | Local toolchain | Docker + Compose only on host | Dev Containers (VS Code lock-in); Nix (package-manager prereq) | — |
-| 5 | API Gateway type | HTTP API + Payload v1.0 | REST API ($3.50 vs $1.00 per M req) | Payload v2.0 does not work reliably with `getAwsProxyHandler` — pet-store canonical uses v1.0 |
-| 6 | VPC egress | Interface Endpoints (Logs in M01; + Secrets Manager in M05) | NAT Gateway ($0.09/hr vs $0.02–0.04/hr) | Lambda-in-VPC has zero cold-start penalty since 2019 (Hyperplane ENIs) — VPC choice is purely a cost question, not a latency one |
-| 7 | DB authentication | IAM token via RDS Proxy (two-hop) | Secrets Manager direct; password in env var | IAM tokens have a 15-min TTL; SnapStart freezes them in the snapshot — the token MUST be refreshed per pool borrow, not at init |
-| 8 | Observability | ADOT Lambda layer + Grafana Cloud free tier | X-Ray-only (no metric dashboard); CloudWatch-only (UX) | **ADOT exec wrapper (`/opt/otel-handler`) is mutually exclusive with FIS's chaos wrapper (`/opt/aws-fis-bootstrap`).** Lambda honors one wrapper per function. Chaos experiments require a parallel non-ADOT stack — doubling infrastructure cost during chaos validation and forfeiting distributed traces on the chaos function. Not advertised in either service's docs. |
-| 9 | Load testing | k6 with `stages` API | JMeter (gradual ramp, GUI workflow); Locust (gradual `spawn_rate`) | — |
-| 10 | Chaos engineering | AWS FIS Lambda actions (`invocation-add-delay`, `invocation-error`) | Custom throttle (FIS has no native Lambda throttle action) | FIS Lambda extension is NOT auto-injected; functions need deploy-time prerequisites (FIS layer + 2 env vars + S3 bucket + IAM grants on both function and FIS roles) — the parallel `LraChaosStack` exists to satisfy these prerequisites without disturbing the canonical PC stack |
-| 11 | CI/CD | GitHub Actions + OIDC (no long-lived AWS keys) | IAM user + access keys (rotation theater) | — |
-
----
-
-## Empirical Findings
-
-Cold-start budget across modules. Numbers below are direct measurements from `us-east-1`, not estimates.
-
-| Module | Configuration | Init Duration (cold) | Restore Duration | Warm Duration | Memory | Standing cost |
+| Module | Configuration | Init (cold) | Restore | Warm | Memory | Standing cost |
 |---|---|---|---|---|---|---|
 | **01 Baseline** | Java 21 + Spring Boot 3.5 + VPC | **4,623 ms** | — | ≈ 5 ms | 182 MB | $0 |
-| **02 Observability** | + ADOT Java agent layer | **8,821 ms avg** (+4,200 ms) | — | 580–620 ms (+575 ms) | 313 MB (+131 MB) | $0 |
-| **03 SnapStart** | + SnapStart + Spring CRaC checkpoint | 12,744–13,344 ms one-time at publish | **737 ms cache-warm · 1,703 ms cache-cold first restore** | 26–27 ms | 313 MB | $0 |
-| **04 Provisioned Concurrency** | + 2 PC × 1024 MB + ASG | Cold start eliminated under burst | — | ≈ 5 ms | 313 MB | **$0.72/day** |
-| **05 Database Resilience** | + Aurora Serverless v2 + RDS Proxy + IAM auth | (unchanged from M04) | (unchanged from M04) | — | — | + Aurora ACU + Proxy 8-ACU min + Secrets Manager VPC endpoint ≈ $1.20/day idle |
-| **06 Load Testing** | M04 stack + 0→500 VU burst-ramp × 80 s | 342,872 invocations · throughput **4,283 req/s** | — | **p(95) = 110 ms · max = 24,690 ms** | — | + ≈ $0.40–0.50 per burst |
-| **07 Chaos** | parallel `LraChaosStack` (no ADOT) + FIS templates | (unchanged from M04 baseline) | — | depends on injection action | — | + FIS $0.10/action-min + duplicated stack |
+| **02 Observability** | + ADOT Java agent layer | **8,821 ms** avg (+4,200 ms) | — | 580–620 ms (+575 ms) | 313 MB (+131 MB) | $0 |
+| **03 SnapStart** | + SnapStart + Spring CRaC checkpoint | 12,744–13,344 ms one-time at publish | **737 ms warm · 1,703 ms first cache-cold** | 26–27 ms | 313 MB | $0 |
+| **04 Provisioned Concurrency** | + 2 PC × 1024 MB + Application Auto Scaling | eliminated under burst | — | ≈ 5 ms | 313 MB | **$0.72/day** |
+| **05 Database Resilience** | + Aurora Serverless v2 + RDS Proxy + IAM auth | (unchanged from M04) | (unchanged) | — | — | + Aurora ACU + Proxy + SM endpoint ≈ $1.20/day idle |
+| **06 Load Testing** | M04 stack + 0→500 VU burst-ramp × 80 s | 342,872 invocations · **4,283 req/s** | — | **p95 = 110 ms · max = 24,690 ms** | — | + ≈ $0.40–0.50 per burst |
+| **07 Chaos** | parallel `LraChaosStack` (no ADOT) + FIS | (unchanged from M04) | — | depends on injection | — | + FIS $0.10/action-min + duplicated stack |
 | **08 CI/CD** | GitHub Actions + OIDC, no long-lived creds | — | — | — | — | $0 |
-
-### Cold-start budget reduction
 
 ```mermaid
 flowchart LR
     M01["M01 Baseline<br/>Init: 4,623 ms<br/>Cost: $0"]
     M02["M02 + ADOT<br/>Init: 8,821 ms<br/>(+4,200 ms tax)<br/>Cost: $0"]
-    M03["M03 + SnapStart<br/>Restore: 1,703 ms<br/>(cache-cold)<br/>737 ms cache-warm<br/>Cost: $0"]
+    M03["M03 + SnapStart<br/>Restore: 1,703 ms<br/>(first cache-cold)<br/>737 ms warm<br/>Cost: $0"]
     M04["M04 + PC<br/>Cold start eliminated<br/>under burst<br/>Cost: $0.72/day"]
 
     M01 -->|"observability tax"| M02
@@ -132,20 +146,95 @@ flowchart LR
     style M04 fill:#d1ecf1,stroke:#0c5460,color:#000
 ```
 
-### Per-module commentary
+Each finding below states the **claim**, the **instrument**, the **measurement**, and the **verdict**.
 
-- **M01 — Baseline.** Java 21 + Spring Boot 3.5 cold start landed at 4,623 ms, more than double the upfront prediction (1.3–2.2 s). Root cause: `spring-cloud-function-serverless-web` transitive dependencies from `aws-serverless-java-container-springboot3:2.1.5` produce more beans than the prediction assumed. Lesson: production Java Lambda cold-start estimates *must* be measured; framework version drift dominates over JVM version drift.
-- **M02 — Observability has a price.** Attaching the ADOT Java agent layer added ≈ 4,200 ms to cold start (4.6 s → 8.8 s) and almost doubled memory (182 MB → 313 MB at 1024 MB allocation). The instrumentation is not free; it is the cost paid for visibility. The dashboard makes the deltas in subsequent modules visible — without it, the SnapStart and PC experiments cannot be reproduced or compared honestly.
-- **M03 — SnapStart is the cheap-but-incomplete default.** The Firecracker microVM snapshot cuts restored cold start from ≈ 9 s (with ADOT) to **737 ms cache-warm** / **1,703 ms cache-cold first restore**, with the actual handler running in 58–62 ms during the restore window. Snapshot capture is a one-time 12–13 second cost at publish (often two snapshots per version due to multi-AZ replication), borne once and amortized over every restore. CRaC `beforeCheckpoint`/`afterRestore` hooks are mandatory for any state the snapshot would freeze incorrectly — open connections, IAM tokens, cached DNS resolutions.
-- **M04 — Provisioned Concurrency is the deterministic eliminator.** With 2 PC × 1024 MB, cold start is eliminated under burst. Standing cost is **$0.72/day**. Application Auto Scaling (schedule-based for known peaks; metric-based on `ProvisionedConcurrencyUtilization` for unknown peaks) makes PC sizing dynamic. The decision criterion is mechanical: use PC when worst-case burst cold start exceeds the latency contract; use SnapStart alone when SnapStart's restore time is below the contract.
-- **M05 — The parallel concurrency failure mode.** Connection exhaustion is the second fail-slow mode. Aurora Serverless v2 at 1 ACU has a ≈ 188-connection ceiling; 1,000 concurrent Lambda invocations × 1 connection each saturates it instantly. RDS Proxy multiplexes client connections to a small Aurora pool. The IAM-token-via-proxy pattern requires per-borrow token refresh in the connection pool because SnapStart freezes the token in the snapshot — discovered by failed deploys, not docs.
-- **M06 — Bimodality is the cold-start signature in production.** Across 342,872 invocations under a 0→500-VU 80-second burst, throughput hit 4,283 req/s with **p(95) = 110 ms and max = 24,690 ms — a 224× ratio**. The system is bimodal: warm invocations cluster near the median; cold-starting containers form a long upper tail. Single-invocation benchmarks miss this entirely. The three-threshold structure (`p(95)<500 ms`, `http_req_failed<1%`, `checks>95%`) earned its keep — different thresholds catch different failure modes.
-- **M07 — Resilience is a measured property.** FIS injected (a) 5,000 ms latency on 50% of invocations and (b) HTTP 500 errors on 10% of invocations. The same k6 burst that passed all three thresholds in M06 had **latency injection collapse goodput while leaving the error rate at zero**, and **error injection spike error rate while leaving latency unchanged** — a single-threshold SLA would have missed one failure mode. **Cost of choosing ADOT (Decision 8) surfaced here**: the chaos stack must be deployed without ADOT because Lambda's exec-wrapper slot is mutually exclusive — `/opt/otel-handler` and `/opt/aws-fis-bootstrap` cannot coexist. A full chaos-validated production stack requires duplicating the function, doubling infrastructure cost during validation, and forfeiting distributed traces on the chaos function.
-- **M08 — Operational discipline is part of the resilience story.** GitHub Actions + OIDC produces a deploy pipeline with zero long-lived AWS credentials, a containerized `gradle:8-jdk21` build job for parity with the local toolchain, and runner-native CDK deploy via `aws-actions/configure-aws-credentials@v4`. Branch protection (`Gradle test` + `CDK synth` as required contexts; `strict: true`; no force pushes) makes `ci.yml` load-bearing. Pipeline cost is effectively $0 and changes the safety profile of every future deploy.
+### LRA-01 — Baseline cold start is not predictable from the runtime
+
+**Instrument:** CloudWatch Logs Insights over `@initDuration`. **Prediction (committed in §6):** 1.3–2.2 s.
+
+Java 21 + Spring Boot 3.5 cold start landed at **4,623 ms** — more than double the committed prediction. Root cause: the `spring-cloud-function-serverless-web` transitive dependencies pulled in by `aws-serverless-java-container-springboot3:2.1.5` instantiate far more beans than the estimate assumed. Framework and dependency-tree drift dominate the cold-start budget far more than JVM version does.
+
+> **Verdict: Corrected.** Production Java Lambda cold-start estimates must be *measured*. A number derived from the runtime version alone is off by a factor of two.
+
+### LRA-02 — Observability is not free
+
+**Instrument:** CWLI (`@initDuration`, `@maxMemoryUsed`) with and without the ADOT layer.
+
+Attaching the ADOT Java agent layer added **≈ 4,200 ms** to cold start (4.6 s → 8.8 s) and nearly doubled memory (**182 MB → 313 MB** at a 1024 MB allocation). The instrumentation is the cost paid for visibility — and that visibility is what makes every later delta in this study reproducible and honestly comparable. But "free observability" is a false framing: you buy it with cold-start budget and memory.
+
+![M02 observability dashboard — Init Duration, Invocation Duration p50/p95/p99, Concurrent Executions, Error Rate](assets/grafana/m02-observability-dashboard.png)
+
+*The M02 Grafana dashboard, fed by ADOT → CloudWatch. Top-left: Init Duration for cold starts clustering at 7–9 s. Top-right: warm Invocation Duration percentiles (p50 ≈ 579 ms). Bottom row: concurrent executions and error rate. This dashboard is the measurement backbone for every subsequent module.*
+
+> **Verdict: Corrected.** Instrumentation carries a quantifiable cold-start and memory tax. Anyone budgeting for a chaos-validated workload should also read [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) — choosing ADOT has a second, architectural cost.
+
+### LRA-03 — SnapStart is the cheap-but-incomplete default
+
+**Instrument:** CWLI parsing raw `RESTORE_REPORT` / `REPORT` `@message` lines (the auto-parsed `@restoreDuration` field is unreliable).
+
+The Firecracker microVM snapshot cuts restored cold start from ≈ 9 s (with ADOT) to **737 ms cache-warm** and **1,703 ms on the first cache-cold restore**, with the actual handler running in 58–62 ms inside the restore window. Snapshot *capture* is a one-time **12–13 s** cost at publish (often two snapshots per version due to multi-AZ replication), amortized over every subsequent restore. CRaC `beforeCheckpoint` / `afterRestore` hooks are mandatory for any state the snapshot would otherwise freeze incorrectly — open connections, IAM tokens, cached DNS.
+
+![M03 SnapStart dashboard — Restore Duration vs Billed Restore Duration, and warm Invocation Duration in the low hundreds of ms](assets/grafana/m03-snapstart-dashboard.png)
+
+*Restore Duration (top-left: `restoreMs` vs `billedRestoreMs`) replaces Init Duration as the cold-start metric under SnapStart. Note the Invocation Duration panel (top-right) now tops out near 175 ms rather than the ~1,700 ms of M02 — the restore path is an order of magnitude cheaper than a full JVM init.*
+
+> **Verdict: Nuanced.** SnapStart works, but "low-hundreds-of-ms restore" only holds for cache-warm restores; the *first* cache-cold restore is ≈ 1.7 s, and capture is a real up-front cost. Use SnapStart alone when 1.7 s meets the latency contract; escalate otherwise.
+
+### LRA-04 — Provisioned Concurrency is the deterministic eliminator
+
+**Instrument:** CloudWatch `ProvisionedConcurrencyUtilization` and `ProvisionedConcurrencySpilloverInvocations` (Match Exact on).
+
+With 2 PC × 1024 MB, cold start is **eliminated under burst** at a standing cost of **$0.72/day**. Application Auto Scaling makes PC sizing dynamic — schedule-based for known peaks, metric-based on `ProvisionedConcurrencyUtilization` for unknown ones. The decision criterion is mechanical: use PC when worst-case burst cold start exceeds the latency contract; use SnapStart alone when its restore time is already below it.
+
+![M04 Provisioned Concurrency Spillover — the AWS/Lambda ProvisionedConcurrencySpilloverInvocations metric with Match Exact enabled](assets/grafana/m04-provisioned-concurrency-spillover.png)
+
+*The instrument for PC: `ProvisionedConcurrencySpilloverInvocations` from the `AWS/Lambda` namespace, scoped by `FunctionName` + `Resource` alias with **Match Exact** on. Spillover — invocations that overflowed the provisioned pool and fell back to on-demand cold starts — is the signal that PC is undersized. Under this module's steady load it stays near zero; [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) shows what it does under a real burst.*
+
+> **Verdict: Confirmed.** PC eliminates cold start deterministically. The trade is money for latency certainty, and the trade is legible on a single panel.
+
+### LRA-05 — A right-sized function still fails on a downstream ceiling
+
+**Instrument:** CloudWatch Aurora `ServerlessDatabaseCapacity` (ACU) and `DatabaseConnections`; CWLI over HikariCP pool activity.
+
+Connection exhaustion is the second fail-slow mode, and it is orthogonal to compute sizing. Aurora Serverless v2 at 1 ACU has a **≈ 188-connection ceiling**; 1,000 concurrent Lambda invocations each opening one connection saturate it instantly. **RDS Proxy** multiplexes many client connections onto a small Aurora pool. The IAM-token-via-proxy pattern carries a subtle mechanism requirement: because SnapStart freezes the token in the snapshot, the token **must be refreshed on every pool borrow**, not once at init — discovered by failed deploys, not by documentation.
+
+![M05 database-resilience dashboard — Errors, 5xx, Aurora Capacity Units, and Aurora Connection Count](assets/grafana/m05-database-resilience-dashboard.png)
+
+*Bottom row is the new instrumentation for this module: Aurora Capacity Unit (left, stepping 0.5 → 1.0 ACU under load) and Aurora Connection Count (right, climbing to ≈ 148 as concurrent invocations arrive) — the connection ceiling made visible. Top row carries forward the error and 5xx panels.*
+
+> **Verdict: Confirmed, with a mechanism correction.** The ceiling is real and compute sizing does not touch it; the SnapStart-plus-IAM-token interaction requires per-borrow refresh, which no single doc page states.
+
+### LRA-06 — Single-invocation benchmarks misrepresent production
+
+**Instrument:** k6 `stages` API, 0→500 VU burst-ramp over 80 s; ADOT → Grafana for concurrency and percentiles.
+
+Across **342,872 invocations** under the burst, throughput hit **4,283 req/s** with **p95 = 110 ms but max = 24,690 ms — a 224× ratio**. The system is **bimodal**: warm invocations cluster near the median while cold-starting containers form a long upper tail. A single-invocation benchmark sees only the warm mode and systematically understates user-facing impact.
+
+![M06 burst-load result — Concurrent Executions ramping to 500, PC Utilization saturating at 1.0, and PC Spillover climbing past 200,000 invocations](assets/grafana/m06-burst-load-result.png)
+
+*The burst regime. Top-left: Concurrent Executions ramping to 500 VUs. Bottom-left: Provisioned Concurrency Utilization saturating at 1.0 — the provisioned pool is fully consumed. Bottom-right: PC Spillover climbing past 200,000 — every invocation beyond the pool takes an on-demand cold start. This is the bimodality of [LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime) reproduced at scale.*
+
+> **Verdict: Corrected.** Production latency is bimodal under burst. The k6 `stages` API and a multi-threshold validation structure are not optional; single-invocation numbers are not evidence.
+
+### LRA-07 — One SLA threshold does not capture resilience
+
+**Instrument:** AWS FIS Lambda actions (`invocation-add-delay`, `invocation-error`) against the same k6 burst that passed cleanly in M06.
+
+FIS injected (a) 5,000 ms latency on 50 % of invocations, then (b) HTTP 500 on 10 % of invocations. The same three-threshold k6 run that passed in [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) showed an asymmetry: **latency injection collapsed goodput while leaving the error rate at zero**, and **error injection spiked the error rate while leaving latency unchanged**. A single-threshold SLA would have declared one of the two failures a pass.
+
+> **Verdict: Corrected.** Resilience is a multi-dimensional property. Latency and error budgets fail independently; validating one is not validating the system.
+
+### LRA-08 — ADOT and FIS cannot instrument the same function
+
+**Instrument:** deploy-time observation — Lambda honors exactly one `AWS_LAMBDA_EXEC_WRAPPER`.
+
+ADOT's exec wrapper (`/opt/otel-handler`) and FIS's chaos wrapper (`/opt/aws-fis-bootstrap`) occupy the **same, single** exec-wrapper slot and are mutually exclusive. A chaos-validated production stack therefore requires either a parallel non-ADOT stack (the `LraChaosStack` in this repo) — doubling infrastructure cost during validation and forfeiting distributed traces on the chaos function — or a deploy-time wrapper toggle. Neither service's documentation advertises the conflict; it surfaced only when both wrappers were configured on one function.
+
+> **Verdict: Corrected.** This is an undocumented architectural constraint. It is the second, hidden cost of choosing ADOT for a workload you also intend to chaos-test ([LRA-02](#lra-02--observability-is-not-free)).
 
 ---
 
-## Synthesis — Six Takeaways
+## 5. Synthesis — six takeaways
 
 ```mermaid
 flowchart TD
@@ -174,35 +263,43 @@ flowchart TD
     style Ship fill:#e2e3e5,stroke:#383d41,color:#000
 ```
 
-**1. Cold start is fail-slow, not fail-stop.** A cold-starting Lambda eventually returns the right answer, but breaches latency budgets at exactly the moment of greatest demand (burst). The failure mode hides in steady-state benchmarks and surfaces in production when traffic spikes — which is precisely when you can least afford it. M01's 4,623 ms baseline is the empirical proof.
+**1. Cold start is fail-slow, not fail-stop.** A cold-starting Lambda eventually returns the right answer, but breaches its latency budget at the moment of greatest demand — which is precisely when you can least afford it. The failure hides in steady-state benchmarks. [LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime)'s 4,623 ms baseline is the proof.
 
-**2. The mitigation hierarchy is hierarchical, not parallel.** Observability comes first because what you cannot measure you cannot improve (M02). SnapStart is the cheap default for workloads where ≈ 1.7 s restore meets the latency contract (M03). PC is the deterministic eliminator for workloads where it does not (M04). Choosing in the wrong order — adding PC before observability is in place, or adding SnapStart without CRaC hooks — produces fragile mitigations that look correct in isolation and fail under burst.
+**2. The mitigation hierarchy is hierarchical, not a menu.** Observability first, because what you cannot measure you cannot improve ([LRA-02](#lra-02--observability-is-not-free)). SnapStart is the cheap default where ≈ 1.7 s restore meets the contract ([LRA-03](#lra-03--snapstart-is-the-cheap-but-incomplete-default)). PC is the deterministic eliminator where it does not ([LRA-04](#lra-04--provisioned-concurrency-is-the-deterministic-eliminator)). Choosing out of order — PC before observability, or SnapStart without CRaC hooks — produces mitigations that look correct in isolation and fail under burst.
 
-**3. Observability is not free — and choosing ADOT specifically forecloses chaos validation on the same function.** ADOT adds ≈ 4,200 ms to cold start (4.6 s → 8.8 s) and almost doubles memory (182 MB → 313 MB). Worse, ADOT's exec wrapper (`/opt/otel-handler`) is mutually exclusive with FIS's chaos wrapper (`/opt/aws-fis-bootstrap`) — a chaos-validated production stack therefore requires either a parallel non-ADOT stack (doubling infrastructure cost during validation) or a deploy-time wrapper toggle the AWS docs do not advertise. A "free observability" framing is dishonest; you are buying visibility with cold-start budget, memory, and architectural complexity. Anyone choosing ADOT for a chaos-validated workload should know the cost upfront.
+**3. Observability is bought, not given — and choosing ADOT forecloses chaos on the same function.** ADOT adds ≈ 4,200 ms of cold start and ≈ 131 MB. Worse, its exec wrapper is mutually exclusive with FIS's ([LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function)), so a chaos-validated stack needs a parallel non-ADOT deployment. Price the visibility before you buy it.
 
-**4. Behavior under burst differs from behavior in isolation.** M01 measured one cold start at 4,623 ms. M06 measured 342,872 invocations under a 0→500-VU ramp where p(95) was 110 ms but max was 24,690 ms — a **224× p(95)/max ratio** that is the bimodality signature of cold starts in production. Single-invocation benchmarks systematically understate user-facing impact. The k6 `stages` API and a multi-threshold validation structure are not optional.
+**4. Behavior under burst differs from behavior in isolation.** One cold start measured 4,623 ms; 342,872 invocations under a 0→500-VU ramp produced a 224× p95/max spread ([LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production)). Single-invocation benchmarks systematically understate impact.
 
-**5. Capacity testing alone is insufficient — chaos verifies SLA under deliberate failure.** Load tests reveal what the system does at the operating envelope; chaos tests reveal what it does outside it. M07's three thresholds caught failure modes a single-threshold SLA would have missed: latency injection collapsed goodput while leaving error rate at zero; error injection spiked error rate while leaving latency unchanged. The two together are the validation; either alone is not.
+**5. Capacity testing alone is insufficient — chaos verifies the SLA under deliberate failure.** Load tests reveal behavior at the operating envelope; chaos reveals behavior outside it. [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience)'s injections caught failures a single-threshold SLA would have passed. The two together are the validation; either alone is not.
 
-**6. Operational discipline is part of the resilience story.** OIDC-federated CI/CD with branch protection (M08) is not a separate concern from cold-start engineering — it ensures every future change is validated against the same baselines that proved the system works. A system that meets its SLA today and ships changes through a pipeline that does not gate them will quietly drift out of compliance within months. Resilience without deployment discipline rots.
-
----
-
-## Companion Documentation
-
-The long-form module walkthroughs — full procedural steps, all CDK code, every CloudWatch Logs Insights query, the empirical numbers above with their full provenance, and an extensive pitfalls catalogue — live in the companion **`constellational_atelier`** Obsidian vault under `Lambda Resilience Atelier/`:
-
-- `LAMBDA_RESILIENCE_ATELIER_EXECUTION_PLAN.md` — task register, module dependency map, scope boundaries.
-- `00-architecture-and-decisions.md` — the full prospective decisions document (the predecessor to this synthesis; preserved unchanged).
-- `01-baseline-deployment.md` through `08-ci-cd.md` — one document per module, ≈ 30–80 K characters each.
-
-The code in this repository is the implementation. The atelier is the curriculum. This document is the synthesis.
+**6. Operational discipline is part of the resilience story.** OIDC-federated CI/CD with branch protection (M08) ensures every future change is validated against the same baselines that proved the system works — no long-lived AWS credentials, a containerized build for local/CI parity, required `Gradle test` + `CDK synth` contexts. A system that meets its SLA today but ships through an ungated pipeline drifts out of compliance within months. Resilience without deployment discipline rots.
 
 ---
 
-## Run It Yourself
+## 6. Design decisions
 
-Prerequisites: Docker 24+ with Compose v2; AWS CLI v2 configured with SSO; an AWS account with CDK bootstrapped in your target region. Nothing else runs on the host — Java, Gradle, Node.js, the AWS CDK CLI, and k6 all live in containers (`docker-compose.yml`).
+The full prospective rationale (Context · Considered Options · Trade-offs · Rejected) was committed **before** the codelab was implemented; the predictions in §2 come from that document. The compact summary below pairs each decision with its principal rejected alternative and — where the consequence only emerged during implementation — a post-hoc note.
+
+| # | Decision | Choice | Principal rejected alternative | Post-hoc consequence |
+|---|---|---|---|---|
+| 1 | Runtime + framework | Java 21 + Spring Boot 3.5 | Quarkus native (eliminates SnapStart's didactic value) | Cold start landed at 4.6 s vs. predicted 1.3–2.2 s ([LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime)); root cause `spring-cloud-function-serverless-web` transitive deps |
+| 2 | Build tool | Gradle 8 + `com.gradleup.shadow:8.3.0` | Bazel (scope mismatch); Maven (host install) | Three Shadow transformations are mandatory: `mergeServiceFiles()`, `PropertiesFileTransformer` on `spring.factories`, `append()` on `spring/*.imports` |
+| 3 | Infra-as-code | AWS CDK v2 (Java) — CLI `2.1118.2`, lib `2.250.0` | Terraform (HCL context switch); SAM (YAML ceiling) | CDK CLI requires Node.js; container needs `/var/run/docker.sock` mount for asset bundling |
+| 4 | Local toolchain | Docker + Compose only on host | Dev Containers (IDE lock-in); Nix (package-manager prereq) | — |
+| 5 | API Gateway type | HTTP API + Payload v1.0 | REST API ($3.50 vs $1.00 per M req) | Payload v2.0 does not work reliably with `getAwsProxyHandler` — pet-store canonical uses v1.0 |
+| 6 | VPC egress | Interface Endpoints (Logs in M01; + Secrets Manager in M05) | NAT Gateway ($0.09/hr vs $0.02–0.04/hr) | Lambda-in-VPC has zero cold-start penalty since 2019 (Hyperplane ENIs) — VPC choice is a cost question, not a latency one |
+| 7 | DB authentication | IAM token via RDS Proxy (two-hop) | Secrets Manager direct; password in env var | IAM tokens have a 15-min TTL; SnapStart freezes them — token must be refreshed per pool borrow ([LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling)) |
+| 8 | Observability | ADOT Lambda layer + Grafana Cloud free tier | X-Ray-only; CloudWatch-only | Exec wrapper mutually exclusive with FIS ([LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function)) — chaos needs a parallel non-ADOT stack |
+| 9 | Load testing | k6 with `stages` API | JMeter (GUI workflow); Locust (gradual spawn) | — |
+| 10 | Chaos engineering | AWS FIS Lambda actions | Custom throttle (FIS has no native Lambda throttle) | FIS extension is not auto-injected; needs FIS layer + 2 env vars + S3 bucket + IAM on both roles — the parallel `LraChaosStack` satisfies these |
+| 11 | CI/CD | GitHub Actions + OIDC (no long-lived keys) | IAM user + access keys (rotation theater) | — |
+
+---
+
+## 7. Reproduce it yourself
+
+Prerequisites: Docker 24+ with Compose v2; AWS CLI v2 configured with SSO; an AWS account with CDK bootstrapped in your target region. **Nothing else runs on the host** — Java, Gradle, Node.js, the AWS CDK CLI, and k6 all live in containers (`docker-compose.yml`).
 
 ```bash
 git clone https://github.com/ae-lexs/lambda-resilience-atelier.git
@@ -214,13 +311,37 @@ docker compose run --rm build ./gradlew :api:shadowJar --no-daemon
 docker compose run --rm cdk cdk deploy LraBaselineStack --require-approval never
 ```
 
-Each module's stack can be deployed independently (`LraBaselineStack`, `LraObservabilityStack`, `LraSnapStartStack`, `LraProvisionedConcurrencyStack`, `LraDatabaseResilienceStack`). `cdk destroy <StackName>` tears each down. Cost discipline is enforced by every module ending with a teardown step.
+Each module's stack deploys independently (`LraBaselineStack`, `LraObservabilityStack`, `LraSnapStartStack`, `LraProvisionedConcurrencyStack`, `LraDatabaseResilienceStack`, `LraChaosStack`). `cdk destroy <StackName>` tears each down; every module ends with a teardown step to hold total cost under $5.
 
-CI/CD runs in GitHub Actions with OIDC against `GitHubActionsRole` — no long-lived AWS credentials in GitHub Secrets. PRs are gated on `Gradle test` + `CDK synth`; deploys are operator-triggered via `workflow_dispatch` from the Actions tab. See Decision 11.
+Load and chaos regimes:
+
+```bash
+API_URL=<your-endpoint> docker compose --profile loadtest run --rm k6 run /loadtest/burst-ramp.js
+```
+
+CI/CD runs in GitHub Actions with OIDC against `GitHubActionsRole` — no long-lived AWS credentials in GitHub Secrets. PRs are gated on `Gradle test` + `CDK synth`; deploys are operator-triggered via `workflow_dispatch`. See Decision 11.
 
 ---
 
-## References
+## 8. How to cite
+
+This study is designed to be cited by downstream work — including the *Compute Resilience* guide it was built to adjudicate. Cite the whole study, or an individual claim by its `LRA-NN` identifier.
+
+```
+Nava, A. (2026). Lambda Resilience Atelier: An Empirical Study of Java Lambda
+Cold-Start Failure Modes and Mitigations (v4.0). GitHub.
+https://github.com/ae-lexs/lambda-resilience-atelier
+```
+
+To cite a specific measured verdict, reference the claim ID and anchor, e.g.:
+
+> The ADOT cold-start tax is measured at +4,200 ms (Lambda Resilience Atelier, [LRA-02](#lra-02--observability-is-not-free), *Corrected*).
+
+All numbers are from `us-east-1`; the region, module configuration, and instrument are stated at each finding so results can be independently reproduced or refuted.
+
+---
+
+## 9. References
 
 | Source | Publisher | URL |
 |---|---|---|
@@ -247,7 +368,10 @@ MIT.
 
 | Version | Date | Changes |
 |---|---|---|
-| v3.1 | May 2026 | **Single-file documentation.** Moved canonical content from `docs/adr/0001-architecture-and-decisions.md` into `README.md` and removed the `docs/adr/` tree. Adapted framing so the document is no longer titled an ADR — it is the repository's single architecture-and-findings document. Added a **Run It Yourself** section near the bottom (prerequisites + the docker-compose deploy commands) so a reader landing on the GitHub repo cold can clone and try it. References to the old ADR path in `docker-compose.yml`, `settings.gradle.kts`, and `docker/cdk.Dockerfile` updated to point to `README.md`. No content changes to the decisions, findings, or synthesis sections — those land here verbatim from v3.0. |
-| v3.0 | May 2026 | **Genre shift: prospective decisions doc → architecture, decisions, and findings synthesis.** Compresses the ten decision narratives into a single 11-row table with post-hoc consequence column (most consequential additions: Decision 1 cold-start delta vs. prediction; Decision 7 IAM-token refresh under SnapStart; Decision 8 ADOT/FIS exec-wrapper mutual exclusion). Adds **Empirical Findings** section with per-module measurement table and per-module commentary covering M01–M08 with the specific numbers obtained in `us-east-1` (M01 baseline 4,623 ms; M02 ADOT +4,200 ms cold-start tax; M03 SnapStart 1,703 ms cache-cold restore; M04 PC eliminates cold start at $0.72/day; M05 connection exhaustion ceiling and IAM-token-per-borrow refresh; M06 224× p(95)/max bimodality signature; M07 latency-vs-error injection asymmetry; M08 OIDC pipeline). Adds **Synthesis — Six Takeaways** section consolidating the cross-cutting conclusions, with a Mermaid mitigation-hierarchy decision tree. Adds **Cold-start budget reduction** Mermaid showing the M01→M02→M03→M04 progression. Adds Companion Documentation pointer to the constellational_atelier Obsidian vault. References section condensed to the primary sources for the synthesis claims; full per-module reference lists live in each atelier module document. **What was removed:** Decisions 1–10 long-form Trade-offs/Rejected sections (preserved in the atelier's `00-architecture-and-decisions.md`); Local Development Architecture section (Module 09 dropped from v1.0 scope); Cost Model section (per-module costs are now in the Empirical Findings table; cost formulas live in each atelier module's Cost Warning callout); Module Dependency Map (lives in the execution plan); Teardown order (lives in each atelier module's Teardown step). Net result: 508 lines → ≈ 230 lines, scope narrowed from "everything we knew prospectively" to "what we proved and what it meant." |
-| v2.0 | April 2026 | Prospective decisions document at `docs/adr/0001-architecture-and-decisions.md`. Captured the ten architectural choices and their rationales before the codelab was implemented. Each decision had Context · Considered Options · Decision · Trade-offs · Rejected sections. Mermaid system architecture diagram established. Module dependency map and cost model included. |
-| v1.0 | April 2026 | Initial draft, replaced by v2.0 within the same month after a full-stack review. |
+| v4.0 | July 2026 | **Genre shift: architecture-and-findings synthesis → self-contained, citable empirical study.** Restructured around a **claim ledger** (§2): eight load-bearing claims now carry stable `LRA-NN` identifiers, a pre-registered prediction, a measured result, and a **Confirmed / Nuanced / Corrected** verdict — so downstream publications can cite an individual adjudicated claim by ID. Added an **Abstract** stating the empirical, pre-registered method explicitly; an **Apparatus and method** section foregrounding the measurement instruments; a **How to cite** section. Embedded five Grafana dashboard exhibits (`assets/grafana/`) as evidence under M02–M06 findings. **Decoupled from the `constellational_atelier` Obsidian vault**: removed the "Companion Documentation" section and the framing of this document as merely "the conclusion" of an external curriculum — the README is now the primary, complete record and stands on its own. No empirical numbers changed from v3.1; they were reorganized from prose commentary into the per-claim ledger. |
+| v3.1 | May 2026 | Single-file documentation: moved canonical content from `docs/adr/0001-architecture-and-decisions.md` into `README.md`, removed the `docs/adr/` tree, added a Run It Yourself section. |
+| v3.0 | May 2026 | Genre shift: prospective decisions doc → architecture, decisions, and findings synthesis. Compressed ten decision narratives into an 11-row table with a post-hoc consequence column; added Empirical Findings and Synthesis sections and the mitigation-hierarchy decision tree. |
+| v2.0 | April 2026 | Prospective decisions document at `docs/adr/0001-architecture-and-decisions.md`: the ten architectural choices and rationales, captured before implementation. Mermaid system architecture and cost model established. |
+| v1.0 | April 2026 | Initial draft, replaced by v2.0 within the same month. |
+</content>
+</invoke>
