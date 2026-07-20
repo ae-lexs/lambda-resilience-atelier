@@ -2,7 +2,7 @@
 
 **An empirical study of Java Lambda cold-start failure modes and their mitigations.**
 
-_v4.0 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
+_v4.1 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
 
 > **Thesis.** Cold start is a **fail-slow** failure mode for Java Lambdas — slow but recoverable, invisible in steady-state benchmarks, and worst at the moment of greatest demand. It is addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be **measured, not assumed**. This repository is the apparatus and the measurements that test that claim end to end.
 
@@ -112,6 +112,8 @@ The measurement method is the load-bearing part of the study; a number without a
 | **k6 `stages` API** | throughput, p95/max latency, `http_req_failed`, `checks` under a controlled `0→500`-VU burst | Multi-threshold (`p(95)<500ms`, `http_req_failed<1%`, `checks>95%`) — different thresholds catch different failure modes (see [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience)). |
 | **AWS FIS Lambda actions** | system behavior under injected latency (`invocation-add-delay`) and errors (`invocation-error`) | Extension is **not** auto-injected; requires deploy-time prerequisites — and forecloses ADOT on the same function ([LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function)). |
 
+> **Measurement standard.** These instruments follow a shared grammar: the four golden signals as **RED** (rate · errors · duration, per boundary) + **USE** (utilization · saturation · errors, per resource), bound by **Little's Law** (`L = λ × W` — concurrency = throughput × latency). This study already emits much of it — `ConcurrentExecutions` *is* `L`; PC utilization/spillover *is* saturation. The signal being deepened is DB-tier **saturation**: RDS Proxy `DatabaseConnectionsBorrowLatency` (the queue for a pooled connection) and Aurora Performance Insights `DBLoad` / Average Active Sessions vs the Max vCPU line.
+
 ---
 
 ## 4. Experiments and findings
@@ -196,7 +198,7 @@ With 2 PC × 1024 MB, cold start is **eliminated under burst** at a standing cos
 
 **Instrument:** CloudWatch Aurora `ServerlessDatabaseCapacity` (ACU) and `DatabaseConnections`; CWLI over HikariCP pool activity.
 
-Connection exhaustion is the second fail-slow mode, and it is orthogonal to compute sizing. Aurora Serverless v2 at 1 ACU has a **≈ 188-connection ceiling**; 1,000 concurrent Lambda invocations each opening one connection saturate it instantly. **RDS Proxy** multiplexes many client connections onto a small Aurora pool. The IAM-token-via-proxy pattern carries a subtle mechanism requirement: because SnapStart freezes the token in the snapshot, the token **must be refreshed on every pool borrow**, not once at init — discovered by failed deploys, not by documentation.
+Connection exhaustion is the second fail-slow mode, and it is orthogonal to compute sizing. Aurora Serverless v2 at 1 ACU has a **≈ 188-connection ceiling**; 1,000 concurrent Lambda invocations each opening one connection saturate it instantly. This is **Little's Law** (`L = λ × W`): concurrency on the database = invocation rate × time-in-system, so 1,000 in-flight invocations is an `L` that blows straight past the ~188 ceiling — and the connection *count* is capped and therefore blind above it, exactly as CRA-04 found on its pool. The true saturation signal is the **queue for a pooled connection** (RDS Proxy `DatabaseConnectionsBorrowLatency`), not the count. **RDS Proxy** multiplexes many client connections onto a small Aurora pool. The IAM-token-via-proxy pattern carries a subtle mechanism requirement: because SnapStart freezes the token in the snapshot, the token **must be refreshed on every pool borrow**, not once at init — discovered by failed deploys, not by documentation.
 
 ![M05 database-resilience dashboard — Errors, 5xx, Aurora Capacity Units, and Aurora Connection Count](assets/grafana/m05-database-resilience-dashboard.png)
 
@@ -235,6 +237,24 @@ ADOT's exec wrapper (`/opt/otel-handler`) and FIS's chaos wrapper (`/opt/aws-fis
 ---
 
 ## 5. Synthesis — six takeaways
+
+These six takeaways are one instance of a single pattern: **the resilience mechanism and the failure amplifier are the same object; whether you get the protective or the amplifying face is decided by detection latency relative to how long the failure lasts.** Cold start is the *scaling* instance — a concurrency spike forces mass initialization → timeouts → retries → more cold starts; SnapStart and Provisioned Concurrency are ways to keep the mechanism on the protective side of that flip.
+
+```mermaid
+flowchart TB
+    M["A compute-resilience mechanism<br/>scaling · retry · health check"]
+    Q{"Is the failure shorter than the<br/>mechanism can outlast or detect?"}
+    P["PROTECTIVE<br/>absorbs the transient blip"]
+    A["AMPLIFIER<br/>compounds the sustained pressure"]
+    M --> Q
+    Q -->|"transient"| P
+    Q -->|"sustained"| A
+    P -.->|"same object, opposite sign"| A
+    style P fill:#d4edda,stroke:#155724,color:#000
+    style A fill:#f8d7da,stroke:#721c24,color:#000
+```
+
+*The sign-flip: warm scaling absorbs a spike; cold scaling under init pressure amplifies it. The mitigation hierarchy below is how this study keeps detection ahead of the failure.*
 
 ```mermaid
 flowchart TD
@@ -329,7 +349,7 @@ This study is designed to be cited by downstream work — including the *Compute
 
 ```
 Nava, A. (2026). Lambda Resilience Atelier: An Empirical Study of Java Lambda
-Cold-Start Failure Modes and Mitigations (v4.0). GitHub.
+Cold-Start Failure Modes and Mitigations (v4.1). GitHub.
 https://github.com/ae-lexs/lambda-resilience-atelier
 ```
 
@@ -368,6 +388,7 @@ MIT.
 
 | Version | Date | Changes |
 |---|---|---|
+| v4.1 | July 2026 | **Folded in the shared measurement standard + the sign-flip framing.** Added a golden-signals → RED+USE / Little's-Law (`L = λ × W`) note to §3, naming the DB-tier saturation deepening (RDS Proxy `DatabaseConnectionsBorrowLatency`, Aurora Performance Insights `DBLoad`/AAS). Expanded LRA-05 into the explicit Little's-Law mechanism (concurrency = rate × time-in-system blows past the ~188 ceiling; the count is capped-and-blind, the borrow-latency queue is the true saturation signal — the same lesson as CRA-04). Added a sign-flip figure to §5 framing cold start as the *scaling* instance of "the resilience mechanism is the amplifier." No empirical numbers changed. |
 | v4.0 | July 2026 | **Genre shift: architecture-and-findings synthesis → self-contained, citable empirical study.** Restructured around a **claim ledger** (§2): eight load-bearing claims now carry stable `LRA-NN` identifiers, a pre-registered prediction, a measured result, and a **Confirmed / Nuanced / Corrected** verdict — so downstream publications can cite an individual adjudicated claim by ID. Added an **Abstract** stating the empirical, pre-registered method explicitly; an **Apparatus and method** section foregrounding the measurement instruments; a **How to cite** section. Embedded five Grafana dashboard exhibits (`assets/grafana/`) as evidence under M02–M06 findings. **Decoupled from the `constellational_atelier` Obsidian vault**: removed the "Companion Documentation" section and the framing of this document as merely "the conclusion" of an external curriculum — the README is now the primary, complete record and stands on its own. No empirical numbers changed from v3.1; they were reorganized from prose commentary into the per-claim ledger. |
 | v3.1 | May 2026 | Single-file documentation: moved canonical content from `docs/adr/0001-architecture-and-decisions.md` into `README.md`, removed the `docs/adr/` tree, added a Run It Yourself section. |
 | v3.0 | May 2026 | Genre shift: prospective decisions doc → architecture, decisions, and findings synthesis. Compressed ten decision narratives into an 11-row table with a post-hoc consequence column; added Empirical Findings and Synthesis sections and the mitigation-hierarchy decision tree. |
