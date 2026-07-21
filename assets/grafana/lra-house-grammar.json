@@ -27,7 +27,8 @@
       "options": {
         "mode": "markdown",
         "content": "**Warm-up protocol applies.** The first burst after any deploy is a transient: on a freshly created Aurora cluster the same load cost **22x more `DBLoad`** and **152x more pool-wait**, producing an 18.9 s tail that fell to 0 by the third run. **Discard the first burst after any deploy, then measure** \u2014 and state warm-up state alongside any number taken from these panels.\n\n**Saturation is read as queueing, not utilization.** `ACUUtilization` is *capacity / configured capacity*; with the cluster pinned at min = max = 2 ACU it reads a constant 100% and carries no information. Read DB saturation from `DBLoadRelativeToNumVCPUs` (threshold 1.0) and pool saturation from `BorrowLatency`.\n\n**Gaps are not zeros.** Performance Insights metrics publish *only while there is load*, so idle windows are absent datapoints rather than zero values."
-      }
+      },
+      "id": 1
     },
     {
       "type": "timeseries",
@@ -182,7 +183,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 2
     },
     {
       "type": "timeseries",
@@ -338,7 +340,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 3
     },
     {
       "type": "timeseries",
@@ -541,7 +544,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 4
     },
     {
       "type": "timeseries",
@@ -690,7 +694,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 5
     },
     {
       "type": "timeseries",
@@ -756,7 +761,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 6
     }
   ]
 }
