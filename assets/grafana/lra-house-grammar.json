@@ -189,7 +189,7 @@
     {
       "type": "timeseries",
       "title": "Pool saturation \u2014 RDS Proxy borrow latency & connections",
-      "description": "Borrow latency is the pool-wait signal \u2014 the RDS-Proxy-side analog of pgxpool acquire-wait in CRA. Rising borrow latency means client sessions are queueing for a backend connection. Note MaxDatabaseConnectionsAllowed is NOT constant; it is plotted as a live series, not a fixed ceiling line.",
+      "description": "Borrow latency is the pool-wait signal - the RDS-Proxy-side analog of pgxpool acquire-wait in CRA. IMPORTANT: the proxy-scoped and instance-scoped connection metrics DISAGREE by roughly 2x. DatabaseConnections{ProxyName} peaked at 161 while DatabaseConnections{DBInstanceIdentifier} peaked at 324, and DBLoad of 312 active sessions corroborates the Aurora-side figure. Treat the Aurora-side series as authoritative for 'how many connections exist'; MaxDatabaseConnectionsAllowed (161) is a per-scope PROXY limit, not the database's connection ceiling. Reading the proxy series alone understates connections by ~2x.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
@@ -286,6 +286,29 @@
           "id": "",
           "expression": "",
           "label": "Max connections allowed"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "",
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "expression": "",
+          "label": "Connections (Aurora-side, authoritative)"
         }
       ],
       "gridPos": {
