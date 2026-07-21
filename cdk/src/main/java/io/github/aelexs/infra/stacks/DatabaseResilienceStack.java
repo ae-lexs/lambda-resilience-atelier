@@ -37,7 +37,9 @@ import software.amazon.awscdk.services.rds.Credentials;
 import software.amazon.awscdk.services.rds.DatabaseCluster;
 import software.amazon.awscdk.services.rds.DatabaseClusterEngine;
 import software.amazon.awscdk.services.rds.DatabaseProxy;
+import software.amazon.awscdk.services.rds.PerformanceInsightRetention;
 import software.amazon.awscdk.services.rds.ProxyTarget;
+import software.amazon.awscdk.services.rds.ServerlessV2ClusterInstanceProps;
 import software.constructs.Construct;
 
 import java.util.List;
@@ -121,24 +123,55 @@ public class DatabaseResilienceStack extends Stack {
             .clusterIdentifier("lra-aurora-cluster")
             .engine(DatabaseClusterEngine.auroraPostgres(
                 AuroraPostgresClusterEngineProps.builder()
-                    .version(AuroraPostgresEngineVersion.VER_16_4)
+                    // 16.4 was retired by RDS and no longer accepts cluster
+                    // creation ("Cannot find version 16.4 for
+                    // aurora-postgresql"). 16.13 is the current 16.x release.
+                    // Check `aws rds describe-db-engine-versions --engine
+                    // aurora-postgresql` before a from-scratch deploy; AWS
+                    // retires minor versions on a rolling basis.
+                    .version(AuroraPostgresEngineVersion.VER_16_13)
                     .build()))
             .vpc(vpc)
             .vpcSubnets(SubnetSelection.builder()
                 .subnetType(SubnetType.PRIVATE_ISOLATED)
                 .build())
-            .writer(ClusterInstance.serverlessV2("writer"))
-            // Aurora API constraint: serverlessV2AutoPauseDuration is only
-            // valid when serverlessV2MinCapacity is 0 (the auto-pause feature
-            // pauses to 0 ACU on idle — at any positive min, the cluster
-            // never pauses and the property would be meaningless). Setting
-            // min to 0.0 enables genuine scale-to-zero with the configured
-            // 5-minute idle window. CFN error if combined incorrectly:
-            // "SecondsUntilAutoPause can only be specified when minimum
-            // capacity is 0."
-            .serverlessV2MinCapacity(0.0)
-            .serverlessV2MaxCapacity(1)
-            .serverlessV2AutoPauseDuration(Duration.minutes(5))
+            .writer(ClusterInstance.serverlessV2("writer",
+                ServerlessV2ClusterInstanceProps.builder()
+                    // Performance Insights is what makes DB-tier saturation
+                    // visible. It publishes DBLoad, DBLoadCPU, DBLoadNonCPU
+                    // and DBLoadRelativeToNumVCPUs into the AWS/RDS
+                    // CloudWatch namespace (dimension: DBInstanceIdentifier),
+                    // which is how Grafana reads them. Note that the PI
+                    // *console* reaches end of support on 2026-07-31; the
+                    // CloudWatch metrics and the PI API are unaffected, so
+                    // dashboards built on them outlive that date.
+                    //
+                    // Caveat for panel design: these metrics are published
+                    // only while there is load on the instance, so idle
+                    // windows appear as gaps rather than zeros.
+                    .enablePerformanceInsights(true)
+                    // Default = 7 days, which is the free tier. Only
+                    // long-term retention (1-24 months) is billed.
+                    .performanceInsightRetention(PerformanceInsightRetention.DEFAULT)
+                    .build()))
+            // Fixed capacity — min == max == 2 ACUs. Two reasons to pin the
+            // range rather than let it float:
+            //
+            //   1. Autoscaling masks the effect under measurement. A cluster
+            //      that grows under load hides the very ceiling these
+            //      experiments exist to locate.
+            //   2. Performance Insights carries memory overhead, and AWS
+            //      recommends a minimum of 2 ACUs when it is enabled. Below
+            //      that, a low maximum can drive the instance into
+            //      `incompatible-parameters` via out-of-memory restarts.
+            //
+            // Auto-pause is deliberately absent. `SecondsUntilAutoPause` is
+            // only valid at a minimum capacity of 0 — and it never took
+            // effect here regardless: an attached RDS Proxy holds an open
+            // connection to every instance in the cluster, which prevents
+            // Aurora serverless instances from auto-pausing at all.
+            .serverlessV2MinCapacity(2)
+            .serverlessV2MaxCapacity(2)
             .credentials(Credentials.fromGeneratedSecret("postgres"))
             .defaultDatabaseName("lra")
             .iamAuthentication(true)

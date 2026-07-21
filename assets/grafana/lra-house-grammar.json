@@ -1,0 +1,762 @@
+{
+  "title": "LRA \u2014 Compute Resilience (house grammar)",
+  "uid": "lra-house-grammar",
+  "tags": [
+    "lambda-resilience-atelier",
+    "phase-0",
+    "house-grammar"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "refresh": "",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "editable": true,
+  "panels": [
+    {
+      "type": "text",
+      "title": "Reading this dashboard",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Warm-up protocol applies.** The first burst after any deploy is a transient: on a freshly created Aurora cluster the same load cost **22x more `DBLoad`** and **152x more pool-wait**, producing an 18.9 s tail that fell to 0 by the third run. **Discard the first burst after any deploy, then measure** \u2014 and state warm-up state alongside any number taken from these panels.\n\n**Saturation is read as queueing, not utilization.** `ACUUtilization` is *capacity / configured capacity*; with the cluster pinned at min = max = 2 ACU it reads a constant 100% and carries no information. Read DB saturation from `DBLoadRelativeToNumVCPUs` (threshold 1.0) and pool saturation from `BorrowLatency`.\n\n**Gaps are not zeros.** Performance Insights metrics publish *only while there is load*, so idle windows are absent datapoints rather than zero values."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "DB load vs capacity \u2014 Aurora saturation",
+      "description": "Average Active Sessions against the vCPU line. The instance presents 1 vCPU at 2 ACU, so DBLoadRelativeToNumVCPUs crossing 1.0 means the database is oversubscribed. DBLoadCPU tracking DBLoad means the load is CPU-class rather than I/O wait.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoadRelativeToNumVCPUs",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "AAS / vCPU (1.0 = saturated)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoad",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "DBLoad avg (AAS)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoad",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "DBLoad max (AAS)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoadCPU",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "DBLoad CPU-class"
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool saturation \u2014 RDS Proxy borrow latency & connections",
+      "description": "Borrow latency is the pool-wait signal \u2014 the RDS-Proxy-side analog of pgxpool acquire-wait in CRA. Rising borrow latency means client sessions are queueing for a backend connection. Note MaxDatabaseConnectionsAllowed is NOT constant; it is plotted as a live series, not a fixed ceiling line.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "BorrowLatency avg"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "BorrowLatency max"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Connections in use"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "MaxDatabaseConnectionsAllowed",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Max connections allowed"
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*[Cc]onnections.*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Little's Law \u2014 L = \u03bbW",
+      "description": "L predicted (lambda*W) is plotted against L observed on the SAME axis - that comparison is the point of the panel. Observed running ABOVE predicted is expected: Lambda's Duration measures handler execution only, so time queued ahead of the handler (SnapStart restore, connection setup) inflates observed concurrency without appearing in W. The gap IS the pre-handler cost. Rate and duration sit on the right axis for context; raw invocations-per-minute is hidden because its scale (~10^4) would flatten everything else.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "m1",
+          "namespace": "AWS/Lambda",
+          "metricName": "Invocations",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "expression": "",
+          "label": "raw_invocations"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "m2",
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "expression": "",
+          "label": "W - mean duration (ms)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "m3",
+          "namespace": "AWS/Lambda",
+          "metricName": "ConcurrentExecutions",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "expression": "",
+          "label": "L observed - concurrent executions"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "e1",
+          "namespace": "",
+          "metricName": "",
+          "dimensions": {},
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 1,
+          "matchExact": true,
+          "expression": "(m1/60)*(m2/1000)",
+          "label": "L predicted - lambda*W"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "id": "e2",
+          "namespace": "",
+          "metricName": "",
+          "dimensions": {},
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 1,
+          "matchExact": true,
+          "expression": "m1/60",
+          "label": "lambda - requests/sec"
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "raw_invocations"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": true
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "W - mean duration (ms)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lambda - requests/sec"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lambda RED \u2014 rate, errors, throttles",
+      "description": "Errors and Throttles are on the RIGHT axis: at ~10^4 invocations/min they are invisible on a shared axis, and their absolute counts are what matter. Throttles must be zero for any DB-tier ceiling result to be interpretable - account concurrency is 1000 (L-B99A9384), and throttling above that produces latency with no database cause. Errors WITHOUT Throttles means the limit found is not Lambda's.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Invocations",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Invocations"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Errors",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Errors"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Throttles",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Throttles"
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Throttles"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency distribution \u2014 bimodality (p50 / p95 / p99 / max)",
+      "description": "The p95-to-max gap IS the bimodality signature. NOTE: the warm/cold split cannot key on @initDuration \u2014 under SnapStart that field does not exist and every record classifies as warm. Restore time appears as 'Restore Duration' in the REPORT message and in separate RESTORE_REPORT records.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "id": "",
+          "expression": "filter @type = \"REPORT\" | stats pct(@duration,50) as p50, pct(@duration,95) as p95, pct(@duration,99) as p99, max(@duration) as max_ms by bin(1m)",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:us-east-1:317751830937:log-group:/aws/lambda/lra-database-resilience:*",
+              "name": "/aws/lambda/lra-database-resilience",
+              "accountId": "317751830937"
+            }
+          ],
+          "statsGroups": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

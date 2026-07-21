@@ -29,7 +29,10 @@ services:
     volumes:
       - .:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.aws:/root/.aws:ro
+      # Mounted read-write, not read-only: the AWS SDK rewrites the cached SSO
+      # token when it refreshes it. Under :ro the refresh fails and the
+      # container loses credentials partway through a long deploy.
+      - ${HOME}/.aws:/root/.aws:rw
       - gradle-cache:/root/.gradle
     environment:
       - CDK_DEFAULT_ACCOUNT=${AWS_ACCOUNT_ID}
