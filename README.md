@@ -71,6 +71,8 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 > **Retracted flag.** An earlier revision of this note also flagged [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production). That was an error and is withdrawn: LRA-06 was measured on the **M04 stack driving `/health`**, which involves no database at all, so an Aurora warm-up transient cannot explain it. Its bimodality has its own instrumented mechanism — PC spillover past 200,000 invocations, shown in its own exhibit. The flag was raised by generalizing an M05-stack finding onto an M04-stack claim without checking which stack produced it. Recorded rather than quietly deleted, because a citable study should show where its own review went wrong.
 >
 > Re-measurement is specified in `PHASE_0_SMOKE_FINDINGS.md`. Until it completes, cite LRA-05 with the caveat attached.
+>
+> **Reproduction cost warning.** The Phase-1 re-measurement consumed **1,870,762 Lambda GB-seconds across 1,473,712 invocations** — 4.7× the monthly AWS Free Tier allowance — at roughly **$25–32** for a single evening. The cost driver is not the infrastructure but the invocations: a Lambda blocked waiting on a saturated database is billed for the waiting, so an experiment designed to induce latency inflates its own bill, and spend rises as throughput falls. Price a reproduction in GB-seconds using the *degraded* latency you intend to cause, not the healthy latency, and check remaining free tier before starting.
 
 ---
 
