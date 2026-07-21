@@ -48,10 +48,19 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 | [LRA-02](#lra-02--observability-is-not-free) | Distributed-tracing instrumentation is effectively free | Negligible overhead | **+4,200 ms** cold start, **+131 MB** | **Corrected** |
 | [LRA-03](#lra-03--snapstart-is-the-cheap-but-incomplete-default) | SnapStart restores a Java Lambda in the low hundreds of ms | Sub-second restore | 737 ms warm · **1,703 ms** first cache-cold | **Nuanced** |
 | [LRA-04](#lra-04--provisioned-concurrency-is-the-deterministic-eliminator) | Provisioned Concurrency eliminates cold start under burst | Eliminated, at a standing cost | Eliminated under 0→500 VU · **$0.72/day** | **Confirmed** |
-| [LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling) | A right-sized function cannot fail on a downstream limit | Compute sizing is the whole story | Aurora **≈188-conn** ceiling at 1 ACU saturates instantly | **Confirmed** + mechanism |
-| [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) | A single-invocation benchmark represents production latency | Representative | p95 **110 ms** vs max **24,690 ms** (**224×**) | **Corrected** |
+| [LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling) | A right-sized function cannot fail on a downstream limit | Compute sizing is the whole story | Aurora **≈188-conn** ceiling at 1 ACU saturates instantly | **Confirmed** + mechanism · **⚠ under re-measurement** |
+| [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) | A single-invocation benchmark represents production latency | Representative | p95 **110 ms** vs max **24,690 ms** (**224×**) | **Corrected** · **⚠ under re-measurement** |
 | [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience) | One latency SLA threshold captures resilience | Sufficient | Latency and error injection hit **different** metrics | **Corrected** |
 | [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) | ADOT and FIS can instrument the same function | They coexist | Exec-wrapper slot is **mutually exclusive** | **Corrected** |
+
+> [!warning] Two claims are under re-measurement — 2026-07-20
+> A Phase-0 instrumentation pass re-ran these experiments on a re-baselined apparatus (Performance Insights enabled, Aurora pinned at 2 ACU, and a load driver that actually reaches the database). Two published results did not survive contact with it. **Both are flagged rather than withdrawn**: the original measurements are real and reproducible under their original conditions; what is in question is whether those conditions support the stated interpretation.
+>
+> **LRA-05 — the connection-ceiling claim.** The prior load driver targeted `/health`, which returns a static map and opens no database connection, so it could not have produced a connection measurement. Re-measurement finds that connections *do* eventually saturate their allowance, but only *after* goodput has already collapsed — throughput peaks at 1,152 req/s and falls to 28 req/s while connections sit at 80–89% utilized. The binding constraint is database CPU, not connection count. The distinction matters because a pool ceiling is a queue (latency rises, throughput holds) while congestive collapse is not (throughput falls), and they demand opposite mitigations.
+>
+> **LRA-06 — the 224× bimodality.** Measured on a first burst after deployment. Re-measurement shows the first burst after cluster creation is a warm-up transient: the same load cost 22× more database load and 152× more pool-wait, producing an 18.9 s tail that fell to **0** by the third identical run. The published 224× therefore likely reflects how soon after cluster creation the test ran, rather than an intrinsic property of the runtime.
+>
+> Re-measurement is specified in `PHASE_0_SMOKE_FINDINGS.md`. Until it completes, cite these two claims with the caveat attached.
 
 ---
 
@@ -59,7 +68,7 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 
 ### System under test
 
-The deployed system is the *union* of all eight modules; each composes additively onto the previous. M01 establishes Lambda + VPC + API Gateway; M02 attaches the ADOT layer; M03 enables SnapStart; M04 attaches Provisioned Concurrency; M05 adds RDS Proxy + Aurora; M06–M07 are observation regimes (no new infrastructure); M08 wires CI/CD. The CDK app exposes **one stack per module**, so any module can be deployed and torn down independently.
+The deployed system is the *union* of all eight modules; each composes additively onto the previous. M01 establishes Lambda + VPC + API Gateway; M02 attaches the ADOT layer; M03 enables SnapStart; M04 attaches Provisioned Concurrency; M05 adds RDS Proxy + Aurora; M06–M07 are observation regimes (no new infrastructure); M08 wired CI/CD (deploy pipeline since removed — see §7). The CDK app exposes **one stack per module**, so any module can be deployed and torn down independently.
 
 ```mermaid
 flowchart LR
@@ -129,7 +138,7 @@ Cold-start budget across modules. Every number is a direct measurement from `us-
 | **05 Database Resilience** | + Aurora Serverless v2 + RDS Proxy + IAM auth | (unchanged from M04) | (unchanged) | — | — | + Aurora ACU + Proxy + SM endpoint ≈ $1.20/day idle |
 | **06 Load Testing** | M04 stack + 0→500 VU burst-ramp × 80 s | 342,872 invocations · **4,283 req/s** | — | **p95 = 110 ms · max = 24,690 ms** | — | + ≈ $0.40–0.50 per burst |
 | **07 Chaos** | parallel `LraChaosStack` (no ADOT) + FIS | (unchanged from M04) | — | depends on injection | — | + FIS $0.10/action-min + duplicated stack |
-| **08 CI/CD** | GitHub Actions + OIDC, no long-lived creds | — | — | — | — | $0 |
+| **08 CI/CD** | GitHub Actions CI (`Gradle test` + `CDK synth`). Deploy pipeline + OIDC role **removed 2026-07-20** — see §7 | — | — | — | — | $0 |
 
 ```mermaid
 flowchart LR
@@ -271,7 +280,7 @@ flowchart TD
     AddPC --> Done
     Done --> Burst[M06 — Validate under burst<br/>not in isolation]
     Burst --> Chaos[M07 — Validate under failure<br/>not just expected conditions]
-    Chaos --> Ship[M08 — Gate every future change<br/>via CI/CD + OIDC]
+    Chaos --> Ship[M08 — Gate every future change<br/>via CI]
 
     style Start fill:#e2e3e5,stroke:#383d41,color:#000
     style AddObs fill:#fff3cd,stroke:#856404,color:#000
@@ -293,7 +302,7 @@ flowchart TD
 
 **5. Capacity testing alone is insufficient — chaos verifies the SLA under deliberate failure.** Load tests reveal behavior at the operating envelope; chaos reveals behavior outside it. [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience)'s injections caught failures a single-threshold SLA would have passed. The two together are the validation; either alone is not.
 
-**6. Operational discipline is part of the resilience story.** OIDC-federated CI/CD with branch protection (M08) ensures every future change is validated against the same baselines that proved the system works — no long-lived AWS credentials, a containerized build for local/CI parity, required `Gradle test` + `CDK synth` contexts. A system that meets its SLA today but ships through an ungated pipeline drifts out of compliance within months. Resilience without deployment discipline rots.
+**6. Operational discipline is part of the resilience story — but a pipeline is itself attack surface.** Gating changes on the same baselines that proved the system works (`Gradle test` + `CDK synth`, containerized build for local/CI parity) is what keeps an SLA-meeting system from drifting out of compliance. That part held: `CDK synth` independently validated the Phase-0 capacity change. The deploy half did not. Its OIDC role carried `AdministratorAccess` scoped to a wildcard `sub` on a public repo, and it was **removed 2026-07-20** (§7). The corrected lesson: deployment discipline is necessary, and an under-scoped pipeline is a *resilience liability*, not a resilience control. Grant the federated identity least privilege and scope it to a branch or environment, or do not federate at all.
 
 ---
 
@@ -313,7 +322,7 @@ The full prospective rationale (Context · Considered Options · Trade-offs · R
 | 8 | Observability | ADOT Lambda layer + Grafana Cloud free tier | X-Ray-only; CloudWatch-only | Exec wrapper mutually exclusive with FIS ([LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function)) — chaos needs a parallel non-ADOT stack |
 | 9 | Load testing | k6 with `stages` API | JMeter (GUI workflow); Locust (gradual spawn) | — |
 | 10 | Chaos engineering | AWS FIS Lambda actions | Custom throttle (FIS has no native Lambda throttle) | FIS extension is not auto-injected; needs FIS layer + 2 env vars + S3 bucket + IAM on both roles — the parallel `LraChaosStack` satisfies these |
-| 11 | CI/CD | GitHub Actions + OIDC (no long-lived keys) | IAM user + access keys (rotation theater) | — |
+| 11 | CI/CD | GitHub Actions CI only. OIDC deploy role **removed** | IAM user + access keys (rotation theater) | **Superseded 2026-07-20.** The OIDC role held `AdministratorAccess` on a wildcard `sub: repo:…:*` in a public repo — a standing admin grant. An OIDC pipeline is only as scoped as its `sub` claim; "no long-lived credentials" is the easy half. See §7 |
 
 ---
 
@@ -339,7 +348,18 @@ Load and chaos regimes:
 API_URL=<your-endpoint> docker compose --profile loadtest run --rm k6 run /loadtest/burst-ramp.js
 ```
 
-CI/CD runs in GitHub Actions with OIDC against `GitHubActionsRole` — no long-lived AWS credentials in GitHub Secrets. PRs are gated on `Gradle test` + `CDK synth`; deploys are operator-triggered via `workflow_dispatch`. See Decision 11.
+CI runs in GitHub Actions: `Gradle test` + `CDK synth`, with `contents: read` and no cloud credentials.
+
+> [!warning] The deploy pipeline was built, then removed — 2026-07-20
+> Module 08 originally added an OIDC-federated `workflow_dispatch` deploy job assuming `GitHubActionsRole`. **It has been deleted, along with the role and the `token.actions.githubusercontent.com` OIDC provider.** Two reasons, and the second is the important one.
+>
+> **It was unused.** Deploys run from the local Docker toolchain (Decision 4). The pipeline existed but nothing drove it.
+>
+> **Its trust policy was a standing admin grant.** `GitHubActionsRole` carried **`AdministratorAccess`**, trusted on `sub: repo:ae-lexs/lambda-resilience-atelier:*` — a wildcard matching any ref, any workflow, any environment, on a **public** repository. That was not directly exploitable (fork pull requests are not issued OIDC tokens, and the job was dispatch-only), but it was a permanent admin path into the account that survived regardless of whether any workflow referenced it. Deleting the workflow while leaving the role would have been strictly worse than doing nothing: the grant persists, with nothing using it and nobody watching it.
+>
+> The lesson revises Decision 11 rather than merely reversing it: **an OIDC pipeline is only as scoped as its `sub` claim.** "No long-lived credentials" is a genuine improvement over access keys, and it is also the easy half. The hard half is scoping the federated identity to a specific branch or environment and granting it least privilege. A wildcard `sub` with `AdministratorAccess` is not meaningfully safer than the access keys it replaced — it is a long-lived credential with better marketing.
+>
+> Branch protection now allows direct pushes but blocks force-pushes and branch deletion, preserving the history integrity that matters for a measurement record.
 
 ---
 
