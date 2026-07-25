@@ -2,7 +2,7 @@
 
 **An empirical study of Java Lambda cold-start failure modes and their mitigations.**
 
-_v4.1 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
+_v4.2 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
 
 > **Thesis.** Cold start is a **fail-slow** failure mode for Java Lambdas — slow but recoverable, invisible in steady-state benchmarks, and worst at the moment of greatest demand. It is addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be **measured, not assumed**. This repository is the apparatus and the measurements that test that claim end to end.
 
@@ -397,7 +397,7 @@ To cite a specific measured verdict, reference the claim ID and anchor, e.g.:
 
 > The ADOT cold-start tax is measured at +4,200 ms (Lambda Resilience Atelier, [LRA-02](#lra-02--observability-is-not-free), *Corrected*).
 
-All numbers are from `us-east-1`; the region, module configuration, and instrument are stated at each finding so results can be independently reproduced or refuted.
+All numbers are from `us-east-1`; the region, module configuration, and instrument are stated at each finding so results can be independently reproduced or refuted. The findings are licensed **CC-BY-4.0** (see [License](#license)): reuse them freely, with attribution.
 
 ---
 
@@ -420,7 +420,12 @@ All numbers are from `us-east-1`; the region, module configuration, and instrume
 
 ## License
 
-MIT.
+This repository is **dual-licensed**, because it is two things at once — running software and a citable empirical study.
+
+- **Source code** — the Java application, AWS CDK infrastructure, and k6 load scripts — is licensed under the **Apache License, Version 2.0** ([`LICENSE`](LICENSE)). Apache-2.0 rather than MIT for its explicit patent grant.
+- **Documentation and empirical findings** — this README, the claim ledger, and the dashboards and diagrams under `assets/` — are licensed under **Creative Commons Attribution 4.0 International** ([`LICENSE-docs`](LICENSE-docs), CC-BY-4.0). Reuse the findings freely; attribute them by claim identifier (§8).
+
+Copyright 2026 Alexis Nava. See [`NOTICE`](NOTICE).
 
 ---
 
@@ -428,6 +433,7 @@ MIT.
 
 | Version | Date | Changes |
 |---|---|---|
+| v4.2 | July 2026 | **Added the license the README had promised but never shipped.** The repository is now explicitly **dual-licensed**: source code under **Apache-2.0** (`LICENSE`) — chosen over the previously-stated MIT for its explicit patent grant — and documentation/findings under **CC-BY-4.0** (`LICENSE-docs`), which encodes the attribution the citable-study framing depends on. Added a `NOTICE` file. No empirical numbers changed. |
 | v4.1 | July 2026 | **Folded in the shared measurement standard + the sign-flip framing.** Added a golden-signals → RED+USE / Little's-Law (`L = λ × W`) note to §3, naming the DB-tier saturation deepening (RDS Proxy `DatabaseConnectionsBorrowLatency`, Aurora Performance Insights `DBLoad`/AAS). Expanded LRA-05 into the explicit Little's-Law mechanism (concurrency = rate × time-in-system blows past the ~188 ceiling; the count is capped-and-blind, the borrow-latency queue is the true saturation signal — the same lesson as CRA-04). Added a sign-flip figure to §5 framing cold start as the *scaling* instance of "the resilience mechanism is the amplifier." No empirical numbers changed. |
 | v4.0 | July 2026 | **Genre shift: architecture-and-findings synthesis → self-contained, citable empirical study.** Restructured around a **claim ledger** (§2): eight load-bearing claims now carry stable `LRA-NN` identifiers, a pre-registered prediction, a measured result, and a **Confirmed / Nuanced / Corrected** verdict — so downstream publications can cite an individual adjudicated claim by ID. Added an **Abstract** stating the empirical, pre-registered method explicitly; an **Apparatus and method** section foregrounding the measurement instruments; a **How to cite** section. Embedded five Grafana dashboard exhibits (`assets/grafana/`) as evidence under M02–M06 findings. **Decoupled from the `constellational_atelier` Obsidian vault**: removed the "Companion Documentation" section and the framing of this document as merely "the conclusion" of an external curriculum — the README is now the primary, complete record and stands on its own. No empirical numbers changed from v3.1; they were reorganized from prose commentary into the per-claim ledger. |
 | v3.1 | May 2026 | Single-file documentation: moved canonical content from `docs/adr/0001-architecture-and-decisions.md` into `README.md`, removed the `docs/adr/` tree, added a Run It Yourself section. |

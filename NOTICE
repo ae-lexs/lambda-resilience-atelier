@@ -1,0 +1,14 @@
+Lambda Resilience Atelier
+Copyright 2026 Alexis Nava
+
+This repository is dual-licensed:
+
+  - Source code (Java application, AWS CDK infrastructure, k6 load
+    scripts, and any other software) is licensed under the Apache
+    License, Version 2.0. See the LICENSE file.
+
+  - Documentation, prose, and empirical findings (the README, the
+    claim ledger, dashboards, and diagrams under assets/) are licensed
+    under the Creative Commons Attribution 4.0 International license
+    (CC-BY-4.0). See the LICENSE-docs file. When citing a finding,
+    attribute it by its claim identifier (e.g. LRA-05).
