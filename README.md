@@ -389,7 +389,7 @@ This study is designed to be cited by downstream work — including the *Compute
 
 ```
 Nava, A. (2026). Lambda Resilience Atelier: An Empirical Study of Java Lambda
-Cold-Start Failure Modes and Mitigations (v4.1). GitHub.
+Cold-Start Failure Modes and Mitigations (v4.2). GitHub.
 https://github.com/ae-lexs/lambda-resilience-atelier
 ```
 
