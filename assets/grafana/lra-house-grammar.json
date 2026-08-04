@@ -747,9 +747,9 @@
           "expression": "filter @type = \"REPORT\" | stats pct(@duration,50) as p50, pct(@duration,95) as p95, pct(@duration,99) as p99, max(@duration) as max_ms by bin(1m)",
           "logGroups": [
             {
-              "arn": "arn:aws:logs:us-east-1:317751830937:log-group:/aws/lambda/lra-database-resilience:*",
+              "arn": "arn:aws:logs:us-east-1:AWS_ACCOUNT_ID:log-group:/aws/lambda/lra-database-resilience:*",
               "name": "/aws/lambda/lra-database-resilience",
-              "accountId": "317751830937"
+              "accountId": "AWS_ACCOUNT_ID"
             }
           ],
           "statsGroups": []

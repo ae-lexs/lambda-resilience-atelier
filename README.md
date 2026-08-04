@@ -2,7 +2,7 @@
 
 **An empirical study of Java Lambda cold-start failure modes and their mitigations.**
 
-_v4.3 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
+_v4.4 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
 
 > **Thesis.** Cold start is a **fail-slow** failure mode for Java Lambdas — slow but recoverable, invisible in steady-state benchmarks, and worst at the moment of greatest demand. It is addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be **measured, not assumed**. This repository is the apparatus and the measurements that test that claim end to end.
 
@@ -187,12 +187,38 @@ Java 21 + Spring Boot 3.5 cold start landed at **4,623 ms** — more than double
 
 ### LRA-02 — Observability is not free
 
-**Instrument:** CWLI (`@initDuration`, `@maxMemoryUsed`) with and without the ADOT layer.
+**Instrument:** CloudWatch Logs Insights over `REPORT` lines — `@initDuration`, `@maxMemoryUsed`, `@billedDuration`. There is **no CloudWatch metric for init duration**; it exists only as a log field, which is why this claim is measured from logs rather than from a metric query. Cold starts are forced by mutating function configuration, which retires every warm execution environment — container lifetime is 5–15 minutes, so waiting does not produce them.
 
 Attaching the ADOT Java agent layer added **≈ 4,200 ms** to cold start (4.6 s → 8.8 s) and nearly doubled memory (**182 MB → 313 MB** at a 1024 MB allocation). The instrumentation is the cost paid for visibility — and that visibility is what makes every later delta in this study reproducible and honestly comparable. But "free observability" is a false framing: you buy it with cold-start budget and memory.
 
+**Re-measured 2026-08-04** on the current instrumentation, with **24 forced cold starts** against the original four:
 
-> **Verdict: Corrected.** Instrumentation carries a quantifiable cold-start and memory tax. Anyone budgeting for a chaos-validated workload should also read [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) — choosing ADOT has a second, architectural cost.
+| | Original (4 samples) | Re-measured (24 samples) |
+|---|---|---|
+| Init duration — avg | 8,821 ms | **8,478 ms** |
+| Init duration — min / max | 8,283 / 9,621 ms | **7,062 / 9,767 ms** |
+| Memory used | ~313 MB | **319 MB** cold · 329 MB avg under load |
+
+The claim survives a 6× larger sample. The wider min–max spread (7.1–9.8 s against 8.3–9.6 s) is what more samples buy: the original four understated the variance, not the magnitude.
+
+![Init Duration across forced cold starts, averaging 8.16 s against a red reference line at the 4,623 ms no-ADOT baseline](assets/grafana/m02-cold-start-tax.png)
+
+*The tax, drawn. Init duration averages **8.16 s** and peaks at **9.77 s**; the red line is the M01 baseline of 4,623 ms measured without the agent. The gap between them is what the ADOT layer costs on every cold start. The axis is anchored at zero deliberately — auto-scaling starts it at the data floor and pushes the baseline line off-canvas, hiding the comparison the panel exists to make.*
+
+![Memory footprint averaging 329 MB against a red reference line at the 182 MB no-ADOT baseline](assets/grafana/m02-memory.png)
+
+*`MaxMemoryUsed` averages **329 MB** and peaks at **349 MB** against the **182 MB** baseline, at a 1024 MB allocation. Cold-start-only invocations sit at 319 MB; the higher figure includes warm invocations under load, where the agent's buffers have filled.*
+
+> [!warning] The init phase is billed, so the cold-start tax is a *cost*, not only a latency
+> Measured directly from the `REPORT` lines of this run — `@billedDuration` equals `@initDuration` + `@duration` on **every** cold invocation:
+>
+> `init 9,767 + duration 591 = 10,358` against **billed 10,359**. Same identity across all six slowest samples, within 1 ms rounding.
+>
+> So the ~4,200 ms the agent adds to initialization is **charged**. At 1 GB that is ~4.2 GB-seconds per cold start — about **$0.00007** each, which sounds negligible until it is multiplied: a workload taking 100,000 cold starts a month pays roughly **$7/month purely for the agent to start up**, before it has served a single request. This is separate from, and additional to, the memory tax.
+>
+> This is an addition to the original claim, not a correction of it: the latency figures stand, and the billing consequence was simply never measured.
+
+> **Verdict: Corrected.** Instrumentation carries a quantifiable cold-start and memory tax, and the cold-start half of it is billed. Anyone budgeting for a chaos-validated workload should also read [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) — choosing ADOT has a second, architectural cost.
 
 ### LRA-03 — SnapStart is the cheap-but-incomplete default
 
@@ -475,6 +501,7 @@ Copyright 2026 Alexis Nava. See [`NOTICE`](NOTICE).
 
 | Version | Date | Changes |
 |---|---|---|
+| v4.4 | August 2026 | **Re-measured [LRA-02](#lra-02--observability-is-not-free) on the current instrumentation and gave it exhibits from the house-grammar dashboard.** 24 forced cold starts against the original four: init duration avg **8,478 ms** (was 8,821), range **7,062–9,767 ms** (was 8,283–9,621), memory **319 MB** cold. The claim survives a 6x larger sample; the wider spread is what more samples buy. **New finding — the init phase is BILLED**, measured directly from REPORT lines where `@billedDuration` equals `@initDuration` + `@duration` on every cold invocation (9,767 + 591 = 10,358 against billed 10,359). The ADOT layer's ~4,200 ms init cost is therefore charged, ~4.2 GB-s per cold start, roughly **$7/month for a workload taking 100,000 cold starts** before serving a request. An addition to the claim, not a correction. Dashboard `lra-m02-observability` applies the house grammar's {replace, retarget, add} rule: the two database-tier panels are replaced (M02 deploys no Aurora), RED/Little's Law/latency are retargeted, and cold-start and memory panels are added. Both new panels anchor their axis at zero so the baseline reference line stays on canvas. **Scrubbed the AWS account ID** from `assets/grafana/lra-house-grammar.json`, which had it embedded in a Logs Insights log-group ARN in a public repo. |
 | v4.3 | August 2026 | **Added [LRA-09](#lra-09--an-explicit-shedder-cuts-cost-but-does-not-demonstrably-raise-goodput) — the ninth claim, and the first tested against a prediction this study had itself pre-registered.** An explicit `resilience4j` circuit breaker at the HikariCP borrow boundary was run A-B-B-A against the unguarded endpoint at 1,600 rps, reserved concurrency 900, with recovery between arms gated on a 400 rps probe rather than a timer. **Cost half confirmed:** GB-seconds per successful request 2.593 → 1.092 (**2.37× cheaper**), control and treatment replicate ranges non-overlapping. **Goodput half NOT established:** 1.26× mean with overlapping ranges — the A1-vs-B1 pair alone showed 1.90× and would have supported a claim the full ordering dissolves. Records the unpredicted **invocation inversion** (breaker arms invoked 3.6× *more* often while costing 44% less — the breaker moves shedding from platform to application rather than protecting the database), the finding that **the knee belongs to the admission limit** (same 1,200 rps: reservation 200 → 1,194.6 rps goodput and `DBLoad` 1.27; reservation 900 → 860.1 rps and `DBLoad` 8.48, 11× the cost), and evidence that **metastable collapse is preventable** (control needed 3 recovery probes and ~8 minutes, each breaker arm 1). Added five exhibits from the new `lra-breaker-experiment` dashboard, rebuilt after teardown. **Corrected two stale exhibit captions** that presented the proxy-scoped `MaxDatabaseConnectionsAllowed` value of 161 as a database connection ceiling; Aurora's own count peaked at 324 and 161 is retired as a ceiling, with the ordering argument unaffected. Added the LRA-09 cost figures (**≈ $7.6**) and the observation that API Gateway becomes the dominant per-request cost once Lambda is inside free tier. |
 | v4.2 | July 2026 | **Added the license the README had promised but never shipped.** The repository is now explicitly **dual-licensed**: source code under **Apache-2.0** (`LICENSE`) — chosen over the previously-stated MIT for its explicit patent grant — and documentation/findings under **CC-BY-4.0** (`LICENSE-docs`), which encodes the attribution the citable-study framing depends on. Added a `NOTICE` file. No empirical numbers changed. |
 | v4.1 | July 2026 | **Folded in the shared measurement standard + the sign-flip framing.** Added a golden-signals → RED+USE / Little's-Law (`L = λ × W`) note to §3, naming the DB-tier saturation deepening (RDS Proxy `DatabaseConnectionsBorrowLatency`, Aurora Performance Insights `DBLoad`/AAS). Expanded LRA-05 into the explicit Little's-Law mechanism (concurrency = rate × time-in-system blows past the ~188 ceiling; the count is capped-and-blind, the borrow-latency queue is the true saturation signal — the same lesson as CRA-04). Added a sign-flip figure to §5 framing cold start as the *scaling* instance of "the resilience mechanism is the amplifier." No empirical numbers changed. |

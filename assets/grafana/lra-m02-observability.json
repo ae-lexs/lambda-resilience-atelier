@@ -1,0 +1,550 @@
+{
+  "uid": "lra-m02-observability",
+  "title": "LRA \u2014 M02 Observability (house grammar)",
+  "tags": [
+    "lambda-resilience-atelier",
+    "m02",
+    "house-grammar"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Reading this dashboard",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 10
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# M02 Observability \u2014 the ADOT tax\n\n**House grammar, adapted per the standing rule: {replace, retarget, add}.** The two database-tier panels of `lra-house-grammar` are **replaced** here \u2014 M02 deploys no Aurora and no RDS Proxy, so plotting `DBLoad` or `BorrowLatency` would render two empty panels and imply an instrument that is not present. RED, Little's Law and the latency distribution are **retargeted** to `lra-observability`. Cold-start and memory panels are **added**, because those are what the LRA-02 claim actually rests on.\n\n**`Init Duration` is a log field, not a metric.** There is no CloudWatch metric for it. It is parsed from the `REPORT` line, which is why the top panels are Logs Insights queries rather than metric queries. This function has **no SnapStart**, so `@initDuration` is present; on a SnapStart function the same field is absent and restore appears as `Restore Duration` inside `@message` instead.\n\n**Warm-up protocol applies.** Cold starts here are forced deliberately by mutating function configuration, which retires every warm execution environment. Each forced cycle yields exactly one cold start per concurrent invocation.\n\n**Gaps are not zeros.** Lambda publishes metrics only while the function is invoked; idle windows are absent datapoints."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Cold start \u2014 Init Duration (the ADOT tax)",
+      "description": "Init Duration parsed from REPORT lines. The red reference line sits at 4,623 ms \u2014 the M01 baseline cold start published in this study, measured WITHOUT the ADOT layer. The gap above that line is the observability tax.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 4623
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:us-east-1:AWS_ACCOUNT_ID:log-group:/aws/lambda/lra-observability:*",
+              "name": "/aws/lambda/lra-observability",
+              "accountId": "AWS_ACCOUNT_ID"
+            }
+          ],
+          "expression": "filter @type = \"REPORT\" and ispresent(@initDuration) | stats max(@initDuration) as init_max_ms, avg(@initDuration) as init_avg_ms by bin(1m)",
+          "statsGroups": [
+            "bin_1m"
+          ],
+          "id": ""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory footprint \u2014 MaxMemoryUsed",
+      "description": "Reference line at 182 MB \u2014 the M01 baseline footprint without ADOT, against a 1024 MB allocation.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 182
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:us-east-1:AWS_ACCOUNT_ID:log-group:/aws/lambda/lra-observability:*",
+              "name": "/aws/lambda/lra-observability",
+              "accountId": "AWS_ACCOUNT_ID"
+            }
+          ],
+          "expression": "filter @type = \"REPORT\" | stats max(@maxMemoryUsed)/1000000 as mem_max_mb, avg(@maxMemoryUsed)/1000000 as mem_avg_mb by bin(1m)",
+          "statsGroups": [
+            "bin_1m"
+          ],
+          "id": ""
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Lambda RED \u2014 rate, errors, throttles",
+      "description": "Retargeted from the house grammar to lra-observability.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Invocations",
+          "dimensions": {
+            "FunctionName": [
+              "lra-observability"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Invocations"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Errors",
+          "dimensions": {
+            "FunctionName": [
+              "lra-observability"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Errors"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Throttles",
+          "dimensions": {
+            "FunctionName": [
+              "lra-observability"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Throttles"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Little's Law \u2014 L = lambda x W",
+      "description": "Retargeted. Observed concurrency runs above the Little's Law prediction by the pre-handler cost, which under ADOT includes agent attach.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-observability"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "W - mean duration (ms)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "ConcurrentExecutions",
+          "dimensions": {
+            "FunctionName": [
+              "lra-observability"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "L observed - concurrent executions"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency distribution \u2014 p50 / p95 / p99 / max",
+      "description": "Retargeted. Log scale, because the cold/warm split spans orders of magnitude.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:us-east-1:AWS_ACCOUNT_ID:log-group:/aws/lambda/lra-observability:*",
+              "name": "/aws/lambda/lra-observability",
+              "accountId": "AWS_ACCOUNT_ID"
+            }
+          ],
+          "expression": "filter @type = \"REPORT\" | stats pct(@duration,50) as p50, pct(@duration,95) as p95, pct(@duration,99) as p99, max(@duration) as max_ms by bin(1m)",
+          "statsGroups": [
+            "bin_1m"
+          ],
+          "id": ""
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0,211,255,1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "arm": "m02-warm",
+  "endpoint": "/health",
+  "offered_rate": 100,
+  "duration": "60s",
+  "outcomes": {
+    "served_200": 6000,
+    "shed_429_breaker": 0,
+    "failed_512_admitted": 0,
+    "throttled_503_platform": 0,
+    "app_error_500": 0,
+    "other": 0,
+    "total_responses": 6000
+  },
+  "goodput_per_s": 100,
+  "served_pct": 100,
+  "dropped_iterations": 0,
+  "latency_ms": {
+    "served_p50": 84.111771,
+    "served_p95": 95.84623095,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": null,
+    "failed_p95": null,
+    "throttled_p50": null
+  }
+}
