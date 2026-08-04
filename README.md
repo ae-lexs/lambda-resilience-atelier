@@ -2,7 +2,7 @@
 
 **An empirical study of Java Lambda cold-start failure modes and their mitigations.**
 
-_v4.2 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
+_v4.3 · Author: Alexis Nava ([@ae-lexs](https://github.com/ae-lexs)) · Region of record: `us-east-1` · Status: Complete_
 
 > **Thesis.** Cold start is a **fail-slow** failure mode for Java Lambdas — slow but recoverable, invisible in steady-state benchmarks, and worst at the moment of greatest demand. It is addressable through a deliberate stack of mitigations whose cost-versus-effect curve must be **measured, not assumed**. This repository is the apparatus and the measurements that test that claim end to end.
 
@@ -32,9 +32,12 @@ Verdicts use three labels:
 - **Nuanced** — the direction held but the magnitude, cost, or boundary conditions differ materially from the naive expectation.
 - **Corrected** — the measurement contradicted the prevailing assumption. *This is the highest-value outcome*: it is the reason to run the experiment instead of paraphrasing the documentation.
 
-Of the eight claims tested, **five are Corrected** — a reminder that the received wisdom about Java Lambda cold start (that it can be estimated from the runtime, that observability is free, that one latency threshold captures resilience) does not survive contact with a dashboard.
+Of the nine claims tested, **five are Corrected** — a reminder that the received wisdom about Java Lambda cold start (that it can be estimated from the runtime, that observability is free, that one latency threshold captures resilience) does not survive contact with a dashboard.
 
-The study spans eight modules: M01 establishes a baseline; M02–M04 build the mitigation hierarchy (observability → SnapStart → Provisioned Concurrency); M05 covers the parallel failure mode of database connection exhaustion; M06–M07 verify behavior under burst load and deliberate fault injection; M08 gates every future change operationally. The empirical findings in §4 are the receipts.
+The study spans eight modules: M01 establishes a baseline; M02–M04 build the mitigation hierarchy (observability → SnapStart → Provisioned Concurrency); M05 covers the parallel failure mode of database connection exhaustion; M06–M07 verify behavior under burst load and deliberate fault injection; M08 gates every future change operationally. A later **Phase-1** campaign re-measured the database tier with corrected instruments and added [LRA-09](#lra-09--an-explicit-shedder-cuts-cost-but-does-not-demonstrably-raise-goodput) — the one claim here tested against a prediction this study had itself pre-registered, rather than against received wisdom. The empirical findings in §4 are the receipts.
+
+> [!note] On reporting a half-failed prediction
+> LRA-09 is **Nuanced** because half of its prediction did not survive. That half is stated as prominently as the half that held, and so is the design choice that exposed it: the arms were run **A-B-B-A** rather than A-B, and a single arm pair showed a 1.90× goodput improvement that the full ordering dissolved to a statistically unsupportable 1.26×. A study that reported the confirming pair alone would not be doing something subtly different from this one.
 
 ---
 
@@ -52,6 +55,7 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 | [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) | A single-invocation benchmark represents production latency | Representative | p95 **110 ms** vs max **24,690 ms** (**224×**) | **Corrected** |
 | [LRA-07](#lra-07--one-sla-threshold-does-not-capture-resilience) | One latency SLA threshold captures resilience | Sufficient | Latency and error injection hit **different** metrics | **Corrected** |
 | [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) | ADOT and FIS can instrument the same function | They coexist | Exec-wrapper slot is **mutually exclusive** | **Corrected** |
+| [LRA-09](#lra-09--an-explicit-shedder-cuts-cost-but-does-not-demonstrably-raise-goodput) | A circuit breaker at the pool boundary raises goodput **and** cuts cost past the knee | Both, per this study's own §IX prediction | Cost **2.37× cheaper per success** (ranges separate) · goodput 1.26× but **ranges overlap** | **Nuanced** |
 
 > [!warning] One claim is under re-measurement — 2026-07-20
 > A Phase-0 instrumentation pass re-ran the database experiment on a re-baselined apparatus: Performance Insights enabled, Aurora pinned at 2 ACU, and a load driver that actually reaches the database. **[LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling) is flagged, not withdrawn.** Its central instrument claim — that the connection *count* is blind and the *queue* for a connection is the true saturation signal — is **confirmed and quantified** by re-measurement. What is in question is the supporting evidence, and one framing.
@@ -60,7 +64,7 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 >
 > **Exhaustion is real but arrives late — and the ceiling figure was wrong.** `DatabaseConnections` is published under two dimension sets that disagree by ~2×: the proxy-scoped series peaked at **161** (its own per-scope limit) while Aurora's own count peaked at **324**, and `DBLoad` of 312 active sessions corroborates the Aurora figure. Reading the proxy series alone understates connections by half. Either way the ordering holds: goodput collapsed from 1,152 req/s to 28 req/s well before any connection limit bound. The binding constraint at the knee is database CPU (`DBLoad` 48 against a 1-vCPU instance), not connection count. The distinction is not pedantic: a pool ceiling is a queue (latency rises, throughput holds) while congestive collapse is not (throughput falls), and enlarging the pool helps the first while actively worsening the second.
 >
-> ![Pool saturation under the staircase ramp — MaxDatabaseConnectionsAllowed flat at 161, connections in use climbing toward it, and BorrowLatency spiking to 27.7 s before the connection line is reached](assets/grafana/phase0-goodput-collapse.png)
+> ![Goodput collapse under the staircase ramp — invocations peaking near 69K per minute then crashing to about 2K while errors climb, with throttles appearing only in the final minutes](assets/grafana/phase0-goodput-collapse.png)
 >
 > *Goodput collapse. Invocations (green, left axis) peak near 69K/min, crash to ~2K while errors (yellow, right axis) climb, then partially recover. Throttles (blue) appear only in the final minutes — the account-concurrency confound is confined to the last stage, so the collapse itself is database-attributable.*
 >
@@ -73,6 +77,8 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 > Re-measurement is specified in `PHASE_0_SMOKE_FINDINGS.md`. Until it completes, cite LRA-05 with the caveat attached.
 >
 > **Reproduction cost warning.** The Phase-1 re-measurement consumed **1,870,762 Lambda GB-seconds across 1,473,712 invocations** — 4.7× the monthly AWS Free Tier allowance — at roughly **$25–32** for a single evening. The cost driver is not the infrastructure but the invocations: a Lambda blocked waiting on a saturated database is billed for the waiting, so an experiment designed to induce latency inflates its own bill, and spend rises as throughput falls. Price a reproduction in GB-seconds using the *degraded* latency you intend to cause, not the healthy latency, and check remaining free tier before starting.
+>
+> The later [LRA-09](#lra-09--an-explicit-shedder-cuts-cost-but-does-not-demonstrably-raise-goodput) campaign came in at **≈ $7.6** for 655,163 GB-seconds across 1,108,604 invocations, because reserved concurrency bounds the worst case arithmetically: `C × T × memoryGB × $0.0000166667` is a ceiling no load-generator misbehavior can exceed. Two cautions from it. **The dominant term moves:** once Lambda sits inside the free tier, **API Gateway** became the largest per-request line item at $1.84 for 1.84M requests, so a cost shape reused from an earlier run will mis-estimate. And a **pre-run estimate must be re-derived when the design changes** — this one was $2–3, revised to $10–14 when the apparatus was reconfigured to reproduce collapse, and the revision is the number that held.
 
 ---
 
@@ -221,9 +227,12 @@ With 2 PC × 1024 MB, cold start is **eliminated under burst** at a standing cos
 
 Connection exhaustion is the second fail-slow mode, and it is orthogonal to compute sizing. Aurora Serverless v2 at 1 ACU has a **≈ 188-connection ceiling**; 1,000 concurrent Lambda invocations each opening one connection saturate it instantly. This is **Little's Law** (`L = λ × W`): concurrency on the database = invocation rate × time-in-system, so 1,000 in-flight invocations is an `L` that blows straight past the ~188 ceiling — and the connection *count* is capped and therefore blind above it, exactly as CRA-04 found on its pool. The true saturation signal is the **queue for a pooled connection** (RDS Proxy `DatabaseConnectionsBorrowLatency`), not the count. **RDS Proxy** multiplexes many client connections onto a small Aurora pool. The IAM-token-via-proxy pattern carries a subtle mechanism requirement: because SnapStart freezes the token in the snapshot, the token **must be refreshed on every pool borrow**, not once at init — discovered by failed deploys, not by documentation.
 
-![Pool saturation — MaxDatabaseConnectionsAllowed flat at 161, connections in use climbing toward it, BorrowLatency spiking to 27.7 s before the connection line is reached](assets/grafana/phase0-pool-saturation.png)
+![Pool saturation — the proxy-scoped connection allowance flat at 161 with connections in use climbing toward it, while BorrowLatency has already spiked to 27.7 s](assets/grafana/phase0-pool-saturation.png)
 
-*The corrected instrument (2026-07-20 apparatus). `MaxDatabaseConnectionsAllowed` (orange) is flat at 161 and connections in use (blue) climb toward it — but `BorrowLatency` (yellow) has already spiked to **27.7 s** at 02:50, two minutes **before** connections touch the allowance at 02:52. The queue saturates first; the count saturates last. That ordering is the whole argument for reading pool-wait rather than pool-occupancy, and it is why the count is described above as blind.*
+*The corrected instrument (2026-07-20 apparatus). `MaxDatabaseConnectionsAllowed` (orange) is flat at 161 and connections in use (blue) climb toward it — but `BorrowLatency` (yellow) has already spiked to **27.7 s** at 02:50, two minutes **before** connections touch that line at 02:52. The queue saturates first; the count saturates last. That ordering is the whole argument for reading pool-wait rather than pool-occupancy, and it is why the count is described above as blind.*
+
+> [!warning] Read 161 as a proxy scope limit, not a database ceiling
+> The orange line in this exhibit is `MaxDatabaseConnectionsAllowed` **dimensioned by `{ProxyName}`** — an RDS Proxy per-scope limit. Aurora's own `DatabaseConnections{DBInstanceIdentifier}` peaked at **324** over the same window, and `DBLoad` of 312 active sessions corroborates the Aurora figure (312 sessions cannot exist across 161 connections). **161 is retired as a connection ceiling.** The ordering argument the exhibit is here to make — queue first, count second — is unaffected, because it concerns *when* each signal moves, not the absolute value of either. A metric name published under several dimension sets is not one metric; it is several, and they can disagree by 2× while each is correct for its own scope.
 
 <details><summary>Superseded exhibit — the count-based instrument (pre-2026-07-20 apparatus)</summary>
 
@@ -262,6 +271,53 @@ FIS injected (a) 5,000 ms latency on 50 % of invocations, then (b) HTTP 500 on 1
 ADOT's exec wrapper (`/opt/otel-handler`) and FIS's chaos wrapper (`/opt/aws-fis-bootstrap`) occupy the **same, single** exec-wrapper slot and are mutually exclusive. A chaos-validated production stack therefore requires either a parallel non-ADOT stack (the `LraChaosStack` in this repo) — doubling infrastructure cost during validation and forfeiting distributed traces on the chaos function — or a deploy-time wrapper toggle. Neither service's documentation advertises the conflict; it surfaced only when both wrappers were configured on one function.
 
 > **Verdict: Corrected.** This is an undocumented architectural constraint. It is the second, hidden cost of choosing ADOT for a workload you also intend to chaos-test ([LRA-02](#lra-02--observability-is-not-free)).
+
+### LRA-09 — An explicit shedder cuts cost but does not demonstrably raise goodput
+
+**Instrument:** Lambda `@billedDuration` from `REPORT` lines via CloudWatch Logs Insights (the quantity AWS actually charges for, not a client-side proxy); k6 status-code counters for goodput; `AWS/RDS` `DBLoad` and `DatabaseConnectionsBorrowLatency` for the database tier. Apparatus: `resilience4j` circuit breaker at the HikariCP borrow boundary, exposed at `/db-breaker` against the unguarded `/db`, both calling one shared `DbQuery` component so workload constancy is structural rather than remembered.
+
+This claim is unusual in this study: the prediction was **pre-registered by this study itself**. A Phase-1 re-measurement observed that Lambda's concurrency cap was acting as an *accidental* load shedder — throttled requests are refused in milliseconds instead of occupying a Lambda for seconds of borrow-wait — and predicted that a **deliberate** shedder should raise goodput *and* cut cost at identical offered load past the knee. Design: **A-B-B-A**, 1,600 rps offered, 3-minute arms, reserved concurrency 900, with recovery between arms gated on a 400 rps probe rather than a timer.
+
+| Arm | Endpoint | Goodput | GB-seconds | Invocations | Avg billed | GB-s / success |
+|---|---|---|---|---|---|---|
+| A1 | `/db` | 256.4/s | 150,680 | 58,312 | 2,584 ms | 3.265 |
+| B1 | `/db-breaker` | 486.7/s | 89,276 | 211,392 | 422 ms | 1.019 |
+| B2 | `/db-breaker` | 355.0/s | 74,431 | 217,263 | 343 ms | 1.165 |
+| A2 | `/db` | 411.1/s | 142,056 | 82,529 | 1,721 ms | 1.920 |
+
+Paired by treatment, with replicate **ranges** stated because n = 2 per arm does not support anything stronger:
+
+| Measure | Control [range] | Breaker [range] | Ratio | Ranges |
+|---|---|---|---|---|
+| GB-s per success | 2.593 [1.920 – 3.265] | 1.092 [1.019 – 1.165] | **0.42×** | **separate** |
+| Total GB-seconds | 146,368 | 81,853 | 0.56× | **separate** |
+| Goodput | 333.8/s [256.4 – 411.1] | 420.9/s [355.0 – 486.7] | 1.26× | **overlap** |
+
+![Billed occupancy across the four arms — control arms averaging seconds per invocation, breaker arms averaging hundreds of milliseconds, on a log scale](assets/grafana/xiii-billed-occupancy.png)
+
+*The cost mechanism, and the reason the cost half of the prediction held. Red regions are control arms, green are breaker arms. A Lambda blocked in HikariCP borrow-wait is billed for the waiting: control invocations run into the 10 s pool timeout and the 29 s function timeout, breaker invocations refuse in milliseconds. Lines break across the recovery gates because Lambda publishes metrics only while invoked — those gaps are genuinely unmeasured, not zero.*
+
+![Invocations versus throttles across the four arms — breaker arms showing high invocations and low throttles, control arms the inverse](assets/grafana/xiii-who-sheds.png)
+
+*The result nobody predicted. Breaker arms were invoked **3.6× more often** than control arms while costing 44% less. Shedding fast drains concurrency; drained concurrency stops the platform throttling; and far more requests then reach application code. The breaker does not reduce load on the system — it **moves the shedding decision from the platform to the application**, and an application rejection is one you can shape with a status code, a retry hint, or a fallback. A platform throttle is a 503 from infrastructure with nothing behind it.*
+
+![Aurora DBLoad against the 1 vCPU saturation line, showing heavy oversubscription in both control and breaker arms](assets/grafana/xiii-aurora-saturation.png)
+
+*Why the breaker is not a database protection. The instance presents **1 vCPU** at 2 ACUs, so `DBLoad` in active average sessions **is** the oversubscription factor. Instantaneous peaks reach **253 and 311 in the control arms and 232 and 225 in the breaker arms** — catastrophic in all four. The `Average` and `AAS / vCPU` series being numerically identical is itself the proof that the vCPU divisor is 1.*
+
+![RDS Proxy borrow latency on a log scale with Aurora connection count on a separate right-hand axis](assets/grafana/xiii-pool-queueing.png)
+
+*Where the pressure actually appears. Borrow latency (left, log µs) moves three orders of magnitude while Aurora connections (right axis, counts) barely move — **214 → 232** across a reservation change from 200 to 900. Connection *count* is not the instrument; the *queue* for a connection is. This is [LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling)'s central lesson, re-demonstrated on a different manipulation.*
+
+**Two further results.**
+
+**The knee belongs to the admission limit, not the database.** Holding offered load fixed at 1,200 rps and changing *only* the function's reserved concurrency: at **200** the system delivered 1,194.6 rps goodput with `DBLoad` 1.27 and 2,417 GB-seconds; at **900** the same load delivered 860.1 rps with `DBLoad` 8.48 and 26,876 GB-seconds. **Raising the concurrency limit lowered throughput and multiplied cost 11×**, because the concurrency limit is admission control on database work. A knee is therefore a property of *a system plus its admission limit*, never of the system alone — quoting one without the other is as incomplete as quoting a number without its instrument.
+
+**Metastable collapse appears preventable.** Recovery between arms was gated on a probe at 400 rps, a rate the baseline served at 100.00%. After the control arm the gate needed **3 probes and ~8 minutes** (25.7% → 57.4% → 100% served); after each breaker arm, **1 probe**. Eight minutes after the control arm stopped, the system was still refusing 42% of requests at a rate it had served perfectly. Neither breaker arm latched at all. With a single control observation this is suggestive rather than established.
+
+> **Verdict: Nuanced.** The cost half is confirmed and robust — both control replicates are worse than both breaker replicates, so the effect survives the ordering control rather than riding on it. The goodput half is **not established**: B2 (355.0/s) is worse than A2 (411.1/s), and the A1-versus-B1 pair alone would have supported a 1.90× claim the full design does not. The honest statement is that goodput did not measurably degrade and may have improved. Breaker tuning (window 5, trip at 3, 250 ms slow-call threshold) was reasoned from Lambda's per-container execution model, not searched — a sweep could plausibly move goodput off the fence.
+
+> **Exhibit source.** Dashboard `lra-breaker-experiment` (`assets/grafana/lra-breaker-experiment.json`), rebuilt **after teardown**: CloudWatch retains metric data ~15 months independently of whether the resource still exists, so every panel above resolves against a deleted Aurora instance and a deleted function. The one panel that could not be rebuilt is the billed-duration *distribution* — it read from Logs Insights, and that log group was deleted with the stack. Its percentiles (control p50 199 ms / p95 13,529 ms against breaker p50 23 ms / p95 397 ms) survive in `loadtest/results/` and in the tables above.
 
 ---
 
@@ -433,6 +489,7 @@ Copyright 2026 Alexis Nava. See [`NOTICE`](NOTICE).
 
 | Version | Date | Changes |
 |---|---|---|
+| v4.3 | August 2026 | **Added [LRA-09](#lra-09--an-explicit-shedder-cuts-cost-but-does-not-demonstrably-raise-goodput) — the ninth claim, and the first tested against a prediction this study had itself pre-registered.** An explicit `resilience4j` circuit breaker at the HikariCP borrow boundary was run A-B-B-A against the unguarded endpoint at 1,600 rps, reserved concurrency 900, with recovery between arms gated on a 400 rps probe rather than a timer. **Cost half confirmed:** GB-seconds per successful request 2.593 → 1.092 (**2.37× cheaper**), control and treatment replicate ranges non-overlapping. **Goodput half NOT established:** 1.26× mean with overlapping ranges — the A1-vs-B1 pair alone showed 1.90× and would have supported a claim the full ordering dissolves. Records the unpredicted **invocation inversion** (breaker arms invoked 3.6× *more* often while costing 44% less — the breaker moves shedding from platform to application rather than protecting the database), the finding that **the knee belongs to the admission limit** (same 1,200 rps: reservation 200 → 1,194.6 rps goodput and `DBLoad` 1.27; reservation 900 → 860.1 rps and `DBLoad` 8.48, 11× the cost), and evidence that **metastable collapse is preventable** (control needed 3 recovery probes and ~8 minutes, each breaker arm 1). Added five exhibits from the new `lra-breaker-experiment` dashboard, rebuilt after teardown. **Corrected two stale exhibit captions** that presented the proxy-scoped `MaxDatabaseConnectionsAllowed` value of 161 as a database connection ceiling; Aurora's own count peaked at 324 and 161 is retired as a ceiling, with the ordering argument unaffected. Added the LRA-09 cost figures (**≈ $7.6**) and the observation that API Gateway becomes the dominant per-request cost once Lambda is inside free tier. |
 | v4.2 | July 2026 | **Added the license the README had promised but never shipped.** The repository is now explicitly **dual-licensed**: source code under **Apache-2.0** (`LICENSE`) — chosen over the previously-stated MIT for its explicit patent grant — and documentation/findings under **CC-BY-4.0** (`LICENSE-docs`), which encodes the attribution the citable-study framing depends on. Added a `NOTICE` file. No empirical numbers changed. |
 | v4.1 | July 2026 | **Folded in the shared measurement standard + the sign-flip framing.** Added a golden-signals → RED+USE / Little's-Law (`L = λ × W`) note to §3, naming the DB-tier saturation deepening (RDS Proxy `DatabaseConnectionsBorrowLatency`, Aurora Performance Insights `DBLoad`/AAS). Expanded LRA-05 into the explicit Little's-Law mechanism (concurrency = rate × time-in-system blows past the ~188 ceiling; the count is capped-and-blind, the borrow-latency queue is the true saturation signal — the same lesson as CRA-04). Added a sign-flip figure to §5 framing cold start as the *scaling* instance of "the resilience mechanism is the amplifier." No empirical numbers changed. |
 | v4.0 | July 2026 | **Genre shift: architecture-and-findings synthesis → self-contained, citable empirical study.** Restructured around a **claim ledger** (§2): eight load-bearing claims now carry stable `LRA-NN` identifiers, a pre-registered prediction, a measured result, and a **Confirmed / Nuanced / Corrected** verdict — so downstream publications can cite an individual adjudicated claim by ID. Added an **Abstract** stating the empirical, pre-registered method explicitly; an **Apparatus and method** section foregrounding the measurement instruments; a **How to cite** section. Embedded five Grafana dashboard exhibits (`assets/grafana/`) as evidence under M02–M06 findings. **Decoupled from the `constellational_atelier` Obsidian vault**: removed the "Companion Documentation" section and the framing of this document as merely "the conclusion" of an external curriculum — the README is now the primary, complete record and stands on its own. No empirical numbers changed from v3.1; they were reorganized from prose commentary into the per-claim ledger. |

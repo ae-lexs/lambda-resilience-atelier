@@ -22,25 +22,25 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 11
+        "h": 16
       },
       "options": {
         "mode": "markdown",
-        "content": "# The breaker experiment \u2014 \u00a7XIII\n\n**A-B-B-A at 1,600 rps offered, 3-minute arms, Lambda reserved concurrency 900.**\nShaded regions mark the arms: **A1 / A2 = control (`/db`, unguarded)**, **B1 / B2 = treatment (`/db-breaker`, resilience4j circuit breaker)**.\nThe long gaps between arms are recovery gates \u2014 each one probed at 400 rps and refused to start the next arm below 98% served.\n\n**What \u00a7IX predicted:** a deliberate shedder at the pool boundary should raise goodput *and* cut cost at identical offered load past the knee.\n**What happened:** cost confirmed (GB-s per successful request 2.593 \u2192 1.092, replicate ranges do not overlap). Goodput **not** established (1.26\u00d7 mean, ranges overlap \u2014 B2 355.0/s is worse than A2 411.1/s).\n\n**Read the panels in this order:**\n1. *Billed occupancy* \u2014 the cost mechanism. Control averages seconds per invocation, breaker averages hundreds of ms. A Lambda blocked in borrow-wait is billed for the waiting.\n2. *Who sheds* \u2014 the unpredicted result. Breaker arms were invoked **3.6\u00d7 more often** while costing 44% less: fast sheds drain concurrency, concurrency drains stop platform throttling, so far more requests reach application code.\n3. *Aurora saturation* \u2014 the database was saturated in **both** arms (peak DBLoad 81 control, 86 breaker). The breaker is not protecting the database; it is moving the shed decision from platform to application.\n4. *Pool queueing* \u2014 where the pressure actually appears. Not in connection count (214 \u2192 232 across reservations) but in borrow latency.\n5. *Admission limit* \u2014 concurrency pinned at 900 throughout, which is what makes the arms comparable.\n\n\u26a0 **The billed-duration distribution panel is absent by necessity.** Its data came from Logs Insights over `/aws/lambda/lra-database-resilience`, and that log group was deleted with the stack at teardown. The percentiles it would have shown (control p50 199 ms / p95 13,529 ms vs breaker p50 23 ms / p95 397 ms) survive only in the write-up and in `loadtest/results/`. CloudWatch *metrics* persist ~15 months and are unaffected \u2014 every panel here still resolves against deleted resources."
+        "content": "# The breaker experiment \u2014 \u00a7XIII\n\n**A-B-B-A at 1,600 rps offered, 3-minute arms, Lambda reserved concurrency 900.**\nShaded regions mark the arms: **red = control (`/db`, unguarded)**, **green = treatment (`/db-breaker`, resilience4j circuit breaker)**, **blue = recovery gates**, which probed at 400 rps and refused to start the next arm below 98% served.\n\n**\u00a7IX predicted** a deliberate shedder would raise goodput *and* cut cost at identical offered load past the knee.\n**Cost: confirmed** \u2014 GB-s per successful request 2.593 \u2192 1.092, replicate ranges do not overlap.\n**Goodput: not established** \u2014 1.26\u00d7 mean, but ranges overlap (B2 355.0/s is worse than A2 411.1/s). A single A1-vs-B1 pair showed 1.90\u00d7 and would have supported a claim the full design does not.\n\n**Panels, in reading order:**\n1. *Billed occupancy* \u2014 the cost mechanism. A Lambda blocked in borrow-wait is billed for the waiting.\n2. *Who sheds* \u2014 the unpredicted result. Breaker arms were invoked **3.6\u00d7 more often** while costing 44% less.\n3. *Aurora saturation* \u2014 the database was hammered in **both** arms. The breaker is not protecting the database; it moves the shed decision from platform to application.\n4. *Pool queueing* \u2014 where pressure actually appears: borrow latency, not connection count (214 \u2192 232 across reservations).\n5. *Admission limit* \u2014 concurrency pinned at 900, which is what makes the arms comparable.\n\n**Reading the gaps.** Lines break where no data exists. Lambda publishes metrics only while invoked, so the recovery gates are genuinely empty, not zero and not a decline.\n\n\u26a0 **The billed-duration distribution panel is absent by necessity.** It read from Logs Insights over `/aws/lambda/lra-database-resilience`, and that log group was deleted with the stack at teardown. Its percentiles (control p50 199 ms / p95 13,529 ms vs breaker p50 23 ms / p95 397 ms) survive only in the write-up and in `loadtest/results/`. CloudWatch *metrics* persist ~15 months and are unaffected \u2014 every panel here resolves against deleted resources."
       }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Billed occupancy \u2014 the cost mechanism",
-      "description": "Control arms sit in HikariCP borrow-wait until the 10s timeout or the 29s Lambda timeout; every second is billed. Breaker arms refuse in milliseconds. Log scale.",
+      "description": "Control arms sit in HikariCP borrow-wait until the 10s pool timeout or the 29s Lambda timeout, and every second is billed. Breaker arms refuse in milliseconds. Log scale.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 16,
         "w": 12,
         "h": 9
       },
@@ -51,8 +51,10 @@
             "drawStyle": "line",
             "lineWidth": 2,
             "fillOpacity": 8,
-            "showPoints": "never",
+            "showPoints": "auto",
+            "pointSize": 4,
             "spanNulls": false,
+            "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "off"
             },
@@ -150,7 +152,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 11,
+        "y": 16,
         "w": 12,
         "h": 9
       },
@@ -161,8 +163,10 @@
             "drawStyle": "line",
             "lineWidth": 2,
             "fillOpacity": 8,
-            "showPoints": "never",
+            "showPoints": "auto",
+            "pointSize": 4,
             "spanNulls": false,
+            "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "off"
             }
@@ -249,14 +253,14 @@
       "id": 4,
       "type": "timeseries",
       "title": "Aurora saturation \u2014 DBLoad vs 1 vCPU",
-      "description": "The instance presents 1 vCPU at 2 ACUs, so this number IS the oversubscription factor. Saturated in both arms \u2014 which is the point.",
+      "description": "The instance presents 1 vCPU at 2 ACUs, so this number IS the oversubscription factor. Note the Average and AAS/vCPU series are numerically identical \u2014 that IS the proof the divisor is 1 (PHASE_0 \u00a7III). Instantaneous peaks: control 253 and 311, breaker 232 and 225. Saturated in both arms, which is the point.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 25,
         "w": 12,
         "h": 9
       },
@@ -267,8 +271,10 @@
             "drawStyle": "line",
             "lineWidth": 2,
             "fillOpacity": 8,
-            "showPoints": "never",
+            "showPoints": "auto",
+            "pointSize": 4,
             "spanNulls": false,
+            "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "line"
             }
@@ -314,13 +320,13 @@
             "uid": "efk64tufw3pj4e"
           },
           "namespace": "AWS/RDS",
-          "metricName": "DBLoadRelativeToNumVCPUs",
+          "metricName": "DBLoad",
           "dimensions": {
             "DBInstanceIdentifier": [
               "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
             ]
           },
-          "statistic": "Average",
+          "statistic": "Maximum",
           "period": "60",
           "region": "default",
           "metricQueryType": 0,
@@ -328,7 +334,7 @@
           "matchExact": true,
           "id": "",
           "expression": "",
-          "label": "AAS / vCPU (1.0 = saturated)"
+          "label": "DBLoad instantaneous peak (AAS)"
         },
         {
           "refId": "B",
@@ -360,13 +366,13 @@
             "uid": "efk64tufw3pj4e"
           },
           "namespace": "AWS/RDS",
-          "metricName": "DBLoad",
+          "metricName": "DBLoadRelativeToNumVCPUs",
           "dimensions": {
             "DBInstanceIdentifier": [
               "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
             ]
           },
-          "statistic": "Maximum",
+          "statistic": "Average",
           "period": "60",
           "region": "default",
           "metricQueryType": 0,
@@ -374,7 +380,7 @@
           "matchExact": true,
           "id": "",
           "expression": "",
-          "label": "DBLoad max (AAS)"
+          "label": "AAS / vCPU (1.0 = saturated)"
         }
       ]
     },
@@ -382,14 +388,14 @@
       "id": 5,
       "type": "timeseries",
       "title": "Pool queueing \u2014 RDS Proxy borrow latency",
-      "description": "Pressure appears as queueing, not as connection count. Connections moved only 214 to 232 across a 200-to-900 reservation change; borrow latency moved three orders of magnitude.",
+      "description": "Pressure appears as queueing, not as connection count: connections moved only 214 to 232 across a 200-to-900 reservation change while borrow latency moved three orders of magnitude. Connections are on the RIGHT axis in count units \u2014 they are not microseconds.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 12,
-        "y": 20,
+        "y": 25,
         "w": 12,
         "h": 9
       },
@@ -400,8 +406,10 @@
             "drawStyle": "line",
             "lineWidth": 2,
             "fillOpacity": 8,
-            "showPoints": "never",
+            "showPoints": "auto",
+            "pointSize": 4,
             "spanNulls": false,
+            "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "off"
             },
@@ -423,7 +431,32 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Aurora connections"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "connections"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -507,7 +540,7 @@
           "matchExact": true,
           "id": "",
           "expression": "",
-          "label": "Aurora connections (right axis)"
+          "label": "Aurora connections"
         }
       ]
     },
@@ -522,7 +555,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 34,
         "w": 24,
         "h": 8
       },
@@ -533,8 +566,10 @@
             "drawStyle": "line",
             "lineWidth": 2,
             "fillOpacity": 8,
-            "showPoints": "never",
+            "showPoints": "auto",
+            "pointSize": 4,
             "spanNulls": false,
+            "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "line"
             }
@@ -656,7 +691,7 @@
           "type": "grafana",
           "uid": "-- Grafana --"
         },
-        "enable": true,
+        "enable": false,
         "hide": false,
         "iconColor": "semi-dark-blue",
         "name": "Recovery gates",
