@@ -1,0 +1,675 @@
+{
+  "uid": "lra-breaker-experiment",
+  "title": "LRA \u2014 The Breaker Experiment (\u00a7XIII)",
+  "tags": [
+    "lambda-resilience-atelier",
+    "phase-1",
+    "breaker-experiment"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "refresh": "",
+  "time": {
+    "from": "2026-08-04T03:08:00.000Z",
+    "to": "2026-08-04T04:38:00.000Z"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Reading this dashboard",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 11
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# The breaker experiment \u2014 \u00a7XIII\n\n**A-B-B-A at 1,600 rps offered, 3-minute arms, Lambda reserved concurrency 900.**\nShaded regions mark the arms: **A1 / A2 = control (`/db`, unguarded)**, **B1 / B2 = treatment (`/db-breaker`, resilience4j circuit breaker)**.\nThe long gaps between arms are recovery gates \u2014 each one probed at 400 rps and refused to start the next arm below 98% served.\n\n**What \u00a7IX predicted:** a deliberate shedder at the pool boundary should raise goodput *and* cut cost at identical offered load past the knee.\n**What happened:** cost confirmed (GB-s per successful request 2.593 \u2192 1.092, replicate ranges do not overlap). Goodput **not** established (1.26\u00d7 mean, ranges overlap \u2014 B2 355.0/s is worse than A2 411.1/s).\n\n**Read the panels in this order:**\n1. *Billed occupancy* \u2014 the cost mechanism. Control averages seconds per invocation, breaker averages hundreds of ms. A Lambda blocked in borrow-wait is billed for the waiting.\n2. *Who sheds* \u2014 the unpredicted result. Breaker arms were invoked **3.6\u00d7 more often** while costing 44% less: fast sheds drain concurrency, concurrency drains stop platform throttling, so far more requests reach application code.\n3. *Aurora saturation* \u2014 the database was saturated in **both** arms (peak DBLoad 81 control, 86 breaker). The breaker is not protecting the database; it is moving the shed decision from platform to application.\n4. *Pool queueing* \u2014 where the pressure actually appears. Not in connection count (214 \u2192 232 across reservations) but in borrow latency.\n5. *Admission limit* \u2014 concurrency pinned at 900 throughout, which is what makes the arms comparable.\n\n\u26a0 **The billed-duration distribution panel is absent by necessity.** Its data came from Logs Insights over `/aws/lambda/lra-database-resilience`, and that log group was deleted with the stack at teardown. The percentiles it would have shown (control p50 199 ms / p95 13,529 ms vs breaker p50 23 ms / p95 397 ms) survive only in the write-up and in `loadtest/results/`. CloudWatch *metrics* persist ~15 months and are unaffected \u2014 every panel here still resolves against deleted resources."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Billed occupancy \u2014 the cost mechanism",
+      "description": "Control arms sit in HikariCP borrow-wait until the 10s timeout or the 29s Lambda timeout; every second is billed. Breaker arms refuse in milliseconds. Log scale.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Duration avg"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Duration max"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Who sheds \u2014 platform throttling vs application shedding",
+      "description": "Breaker arms show MORE invocations and FEWER throttles. Shedding fast drains concurrency, which stops the platform throttling, which lets more requests reach code that can answer them.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Invocations",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Invocations (reached app)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Throttles",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Throttles (platform refused)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Aurora saturation \u2014 DBLoad vs 1 vCPU",
+      "description": "The instance presents 1 vCPU at 2 ACUs, so this number IS the oversubscription factor. Saturated in both arms \u2014 which is the point.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoadRelativeToNumVCPUs",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "AAS / vCPU (1.0 = saturated)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoad",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "DBLoad avg (AAS)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DBLoad",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "DBLoad max (AAS)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pool queueing \u2014 RDS Proxy borrow latency",
+      "description": "Pressure appears as queueing, not as connection count. Connections moved only 214 to 232 across a 200-to-900 reservation change; borrow latency moved three orders of magnitude.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Borrow latency avg"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Borrow latency max"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-nosdp3bbcidl"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Aurora connections (right axis)"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Admission limit \u2014 ConcurrentExecutions pinned at 900",
+      "description": "Reserved concurrency 900 in every arm. This is what makes the arms comparable \u2014 and, per the knee finding, what determines where the knee sits at all.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "ConcurrentExecutions",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Concurrent executions"
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "semi-dark-red",
+        "name": "Control arms (/db)",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [
+            "lra-xiii",
+            "control"
+          ],
+          "type": "tags"
+        }
+      },
+      {
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "semi-dark-green",
+        "name": "Breaker arms (/db-breaker)",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [
+            "lra-xiii",
+            "breaker"
+          ],
+          "type": "tags"
+        }
+      },
+      {
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "semi-dark-blue",
+        "name": "Recovery gates",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [
+            "lra-xiii",
+            "gate"
+          ],
+          "type": "tags"
+        }
+      }
+    ]
+  }
+}
