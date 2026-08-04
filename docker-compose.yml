@@ -39,14 +39,28 @@ services:
       - CDK_DEFAULT_REGION=${AWS_REGION:-us-east-1}
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-us-east-1}
+
   k6:
     image: grafana/k6
     profiles: ["loadtest"]
     working_dir: /loadtest
     volumes:
-      - ./loadtest:/loadtest:ro
+      # Read-write, not read-only: db-breaker-arm.js writes a per-arm JSON
+      # summary under loadtest/results/ from handleSummary(). Those files are
+      # the experiment's raw record and are committed next to the script that
+      # produced them, so a reader can check the write-up against the numbers
+      # instead of taking its word for them.
+      - ./loadtest:/loadtest:rw
     environment:
       - API_URL=${API_URL}
+      # Breaker-experiment parameters. ENDPOINT selects the arm (/db is the
+      # unguarded control, /db-breaker the treatment); ARM names the output
+      # file. Blank defaults are intentional — the script supplies its own,
+      # and Compose would otherwise warn on every unset variable.
+      - ENDPOINT=${ENDPOINT:-}
+      - RATE=${RATE:-}
+      - DURATION=${DURATION:-}
+      - ARM=${ARM:-}
 
 volumes:
   gradle-cache:

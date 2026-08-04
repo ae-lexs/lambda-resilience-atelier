@@ -211,6 +211,64 @@ public class DatabaseResilienceStack extends Stack {
             .handler("io.github.aelexs.api.StreamLambdaHandler::handleRequest")
             .memorySize(1024)
             .timeout(Duration.seconds(29))
+            // ── Reserved concurrency: cost ceiling and confound control ─────
+            // Two jobs, and they are worth separating.
+            //
+            //   1. COST CEILING. Lambda duration cost is occupancy × time.
+            //      With concurrency reserved at C, the worst-case duration
+            //      bill for a run of T seconds is exactly
+            //      C × T × memoryGB × $0.0000166667 — independent of what
+            //      the load generator does. At C=200, 1 GB, a 5-minute
+            //      stage cannot exceed 200 × 300 × 1 × 0.0000166667 = $1.00
+            //      however badly the experiment misbehaves. PHASE_0 §XI
+            //      records a session that cost $31 in duration alone because
+            //      nothing bounded occupancy; this is that bound.
+            //
+            //   2. CONFOUND CONTROL. PHASE_0 §IX found concurrency pinning
+            //      at the *account* cap of 1000, which contaminated every
+            //      stage above 400 rps with Lambda-tier throttling. A
+            //      function-scoped reservation makes the limit explicit,
+            //      declared, and identical across both arms of the breaker
+            //      experiment rather than a shared account-wide quota that
+            //      any other function could move.
+            //
+            // ⚠ THIS SETTING MOVES THE KNEE. It is not a neutral guardrail.
+            //
+            // PHASE_0 §XIII measured the same offered load of 1,200 rps
+            // under two reservations and nothing else changed:
+            //
+            //   reservation 200 -> 1,194.6 rps goodput, DBLoad 1.27,
+            //                      borrow 2.7 ms,    2,417 GB-seconds
+            //   reservation 900 ->   860.1 rps goodput, DBLoad 8.48,
+            //                      borrow 16.6 ms,  26,876 GB-seconds
+            //
+            // Raising the limit LOWERED throughput and multiplied cost 11x,
+            // because the concurrency limit is admission control on database
+            // work: a higher limit admits more simultaneous queries into a
+            // fixed 1-vCPU database. At 200 this apparatus does not collapse
+            // at all through 1,200 rps — which is excellent operationally
+            // and useless for an experiment that needs a collapse to study.
+            //
+            // 200 is therefore the committed default: it is the safe value,
+            // it bounds worst-case duration cost at C x T x memoryGB x
+            // $0.0000166667 (200 x 300 s x 1 GB = $1.00 per 5-minute stage),
+            // and it is what anyone re-running this stack should get.
+            //
+            // To REPRODUCE §XIII's collapse conditions, raise it at runtime
+            // rather than editing this file — put-function-concurrency
+            // changes only the reservation, whereas a redeploy republishes
+            // the version, mints a new SnapStart snapshot and discards every
+            // warm container, confounding the run with a cold-start
+            // transient:
+            //
+            //   aws lambda put-function-concurrency \
+            //     --function-name lra-database-resilience \
+            //     --reserved-concurrent-executions 900
+            //
+            // 900 and not 1000: AWS requires at least 100 unreserved
+            // concurrent executions to remain in the account, so reserving
+            // the full 1000 account quota is rejected outright.
+            .reservedConcurrentExecutions(200)
             .vpc(vpc)
             .vpcSubnets(SubnetSelection.builder()
                 .subnetType(SubnetType.PRIVATE_ISOLATED)
@@ -255,6 +313,40 @@ public class DatabaseResilienceStack extends Stack {
 
         // ── Published Version + Alias (Module 03 SnapStart pattern) ─────────
         Version version = lambdaFn.getCurrentVersion();
+
+        // ⚠ ORDERING RACE — do not remove this dependency.
+        //
+        // Publishing a version is not a bookkeeping operation under
+        // SnapStart: Lambda runs the full initialization phase to capture
+        // the snapshot. This application's initialization connects to the
+        // database, because SPRING_SQL_INIT_MODE=always makes Spring run
+        // schema.sql and data.sql during context refresh. So the Version
+        // resource silently requires a reachable, target-registered RDS
+        // Proxy at create time.
+        //
+        // CloudFormation cannot infer that. Nothing in the Version's own
+        // properties references the proxy — the connection is made by
+        // application code from an environment variable — so CFN is free to
+        // create the Version in parallel with the proxy's target group.
+        //
+        // When it loses that race the deployment fails as:
+        //
+        //   AWS::Lambda::Version ... did not stabilize.
+        //   An error occurred during function initialization.
+        //
+        // with the real cause only visible in the function's log group:
+        // PSQLException: The connection attempt failed / EOFException. The
+        // EOF is diagnostic — the proxy endpoint exists and completes a TCP
+        // handshake, then drops the connection because it has no available
+        // target behind it yet. A proxy that did not exist at all would
+        // give connection-refused or DNS failure instead.
+        //
+        // This is the same class of hidden-cause failure as the Module 04
+        // "Provisioned Concurrency configuration failed to be applied"
+        // note in IamTokenAuthDataSourceConfig: CloudFormation reports the
+        // resource that failed to stabilize, never the initialization error
+        // that caused it. Always tail the log group.
+        version.getNode().addDependency(proxy);
 
         Alias alias = Alias.Builder.create(this, "LiveAlias")
             .aliasName("live")

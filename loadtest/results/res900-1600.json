@@ -1,0 +1,27 @@
+{
+  "arm": "res900-1600",
+  "endpoint": "/db",
+  "offered_rate": 1600,
+  "duration": "60s",
+  "outcomes": {
+    "served_200": 139,
+    "shed_429_breaker": 0,
+    "failed_512_admitted": 0,
+    "throttled_503_platform": 89479,
+    "app_error_500": 3097,
+    "other": 1926,
+    "total_responses": 94641
+  },
+  "goodput_per_s": 2.3,
+  "served_pct": 0.15,
+  "dropped_iterations": 1362,
+  "latency_ms": {
+    "served_p50": 10108.68563,
+    "served_p95": 26035.5360002,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": 14240.748367,
+    "failed_p95": 29098.8358496,
+    "throttled_p50": 76.145541
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "arm": "container-warmup",
+  "endpoint": "/db",
+  "offered_rate": 100,
+  "duration": "60s",
+  "outcomes": {
+    "served_200": 5944,
+    "shed_429_breaker": 0,
+    "failed_512_admitted": 0,
+    "throttled_503_platform": 57,
+    "app_error_500": 0,
+    "other": 0,
+    "total_responses": 6001
+  },
+  "goodput_per_s": 99.1,
+  "served_pct": 99.05,
+  "dropped_iterations": 0,
+  "latency_ms": {
+    "served_p50": 86.4109375,
+    "served_p95": 119.20070974999993,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": null,
+    "failed_p95": null,
+    "throttled_p50": 78.129042
+  }
+}

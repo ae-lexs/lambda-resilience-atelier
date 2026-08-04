@@ -1,0 +1,27 @@
+{
+  "arm": "probe-after-A1-1",
+  "endpoint": "/db",
+  "offered_rate": 400,
+  "duration": "45s",
+  "outcomes": {
+    "served_200": 4585,
+    "shed_429_breaker": 0,
+    "failed_512_admitted": 0,
+    "throttled_503_platform": 10873,
+    "app_error_500": 1689,
+    "other": 680,
+    "total_responses": 17827
+  },
+  "goodput_per_s": 101.9,
+  "served_pct": 25.72,
+  "dropped_iterations": 174,
+  "latency_ms": {
+    "served_p50": 139.920333,
+    "served_p95": 1178.009601,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": 14685.228118,
+    "failed_p95": 29104.9100664,
+    "throttled_p50": 73.319292
+  }
+}

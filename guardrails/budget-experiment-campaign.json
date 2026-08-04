@@ -1,0 +1,22 @@
+{
+  "BudgetName": "LRA Experiment Campaign",
+  "BudgetLimit": {
+    "Amount": "50",
+    "Unit": "USD"
+  },
+  "TimeUnit": "MONTHLY",
+  "BudgetType": "COST",
+  "CostTypes": {
+    "IncludeCredit": false,
+    "IncludeDiscount": true,
+    "IncludeOtherSubscription": true,
+    "IncludeRecurring": true,
+    "IncludeRefund": false,
+    "IncludeSubscription": true,
+    "IncludeSupport": true,
+    "IncludeTax": true,
+    "IncludeUpfront": true,
+    "UseAmortized": false,
+    "UseBlended": false
+  }
+}

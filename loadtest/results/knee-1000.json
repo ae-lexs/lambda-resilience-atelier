@@ -1,0 +1,27 @@
+{
+  "arm": "knee-1000",
+  "endpoint": "/db",
+  "offered_rate": 1000,
+  "duration": "60s",
+  "outcomes": {
+    "served_200": 60000,
+    "shed_429_breaker": 0,
+    "failed_512_admitted": 0,
+    "throttled_503_platform": 0,
+    "app_error_500": 0,
+    "other": 1,
+    "total_responses": 60001
+  },
+  "goodput_per_s": 1000,
+  "served_pct": 100,
+  "dropped_iterations": 0,
+  "latency_ms": {
+    "served_p50": 83.782646,
+    "served_p95": 126.13061489999998,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": null,
+    "failed_p95": null,
+    "throttled_p50": null
+  }
+}

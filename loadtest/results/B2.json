@@ -1,0 +1,27 @@
+{
+  "arm": "B2",
+  "endpoint": "/db-breaker",
+  "offered_rate": 1600,
+  "duration": "3m",
+  "outcomes": {
+    "served_200": 63906,
+    "shed_429_breaker": 147941,
+    "failed_512_admitted": 4782,
+    "throttled_503_platform": 70883,
+    "app_error_500": 442,
+    "other": 44,
+    "total_responses": 287998
+  },
+  "goodput_per_s": 355,
+  "served_pct": 22.19,
+  "dropped_iterations": 0,
+  "latency_ms": {
+    "served_p50": 147.754875,
+    "served_p95": 818.9319272499998,
+    "shed_p50": 87.850708,
+    "shed_p95": 211.739125,
+    "failed_p50": 10115.555484,
+    "failed_p95": 14835.240223599998,
+    "throttled_p50": 78.274292
+  }
+}

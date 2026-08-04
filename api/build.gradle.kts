@@ -41,6 +41,16 @@ dependencies {
     // AWS SDK v2 — RDS module includes RdsUtilities for IAM auth token generation.
     // Use 2.x 'rds' artifact (not the deprecated v1 sdk-java).
     implementation("software.amazon.awssdk:rds:2.28.0")
+
+    // resilience4j — circuit breaker at the connection-pool boundary
+    // (BreakerDbController). The core module only, used programmatically:
+    // the `resilience4j-spring-boot3` starter would pull in Actuator and
+    // Spring AOP to support @CircuitBreaker annotations, adding beans and
+    // proxying to a cold start this atelier spends its time measuring, in
+    // exchange for annotation sugar over a single call site. One
+    // explicitly-constructed breaker is also easier to read as a codelab
+    // exhibit than an annotation whose configuration lives in a YAML file.
+    implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.2.0")
 }
 
 tasks.shadowJar {

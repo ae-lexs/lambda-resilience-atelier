@@ -1,0 +1,23 @@
+{
+  "arm": "warmup-1",
+  "endpoint": "/db",
+  "offered_rate": 400,
+  "duration": "2m",
+  "outcomes": {
+    "served_200": 24854,
+    "shed_429": 0,
+    "failed_503": 22688,
+    "throttled_other_5xx": 459,
+    "other": 0,
+    "total_responses": 48001
+  },
+  "dropped_iterations": 0,
+  "latency_ms": {
+    "served_p50": 113.69889649999999,
+    "served_p95": 450.54812969999983,
+    "shed_p50": null,
+    "shed_p95": null,
+    "failed_p50": 71.397,
+    "failed_p95": 79.9791829
+  }
+}
