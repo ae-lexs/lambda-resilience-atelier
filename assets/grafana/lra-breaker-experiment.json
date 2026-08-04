@@ -22,25 +22,241 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 16
+        "h": 14
       },
       "options": {
         "mode": "markdown",
-        "content": "# The breaker experiment \u2014 \u00a7XIII\n\n**A-B-B-A at 1,600 rps offered, 3-minute arms, Lambda reserved concurrency 900.**\nShaded regions mark the arms: **red = control (`/db`, unguarded)**, **green = treatment (`/db-breaker`, resilience4j circuit breaker)**, **blue = recovery gates**, which probed at 400 rps and refused to start the next arm below 98% served.\n\n**\u00a7IX predicted** a deliberate shedder would raise goodput *and* cut cost at identical offered load past the knee.\n**Cost: confirmed** \u2014 GB-s per successful request 2.593 \u2192 1.092, replicate ranges do not overlap.\n**Goodput: not established** \u2014 1.26\u00d7 mean, but ranges overlap (B2 355.0/s is worse than A2 411.1/s). A single A1-vs-B1 pair showed 1.90\u00d7 and would have supported a claim the full design does not.\n\n**Panels, in reading order:**\n1. *Billed occupancy* \u2014 the cost mechanism. A Lambda blocked in borrow-wait is billed for the waiting.\n2. *Who sheds* \u2014 the unpredicted result. Breaker arms were invoked **3.6\u00d7 more often** while costing 44% less.\n3. *Aurora saturation* \u2014 the database was hammered in **both** arms. The breaker is not protecting the database; it moves the shed decision from platform to application.\n4. *Pool queueing* \u2014 where pressure actually appears: borrow latency, not connection count (214 \u2192 232 across reservations).\n5. *Admission limit* \u2014 concurrency pinned at 900, which is what makes the arms comparable.\n\n**Reading the gaps.** Lines break where no data exists. Lambda publishes metrics only while invoked, so the recovery gates are genuinely empty, not zero and not a decline.\n\n\u26a0 **The billed-duration distribution panel is absent by necessity.** It read from Logs Insights over `/aws/lambda/lra-database-resilience`, and that log group was deleted with the stack at teardown. Its percentiles (control p50 199 ms / p95 13,529 ms vs breaker p50 23 ms / p95 397 ms) survive only in the write-up and in `loadtest/results/`. CloudWatch *metrics* persist ~15 months and are unaffected \u2014 every panel here resolves against deleted resources."
+        "content": "# The breaker experiment \u2014 \u00a7XIII\n\n**A-B-B-A at 1,600 rps offered, 3-minute arms, Lambda reserved concurrency 900.** Red = control (`/db`, unguarded), green = treatment (`/db-breaker`, resilience4j circuit breaker).\n\n**\u00a7IX predicted** a deliberate shedder would raise goodput *and* cut cost at identical offered load past the knee.\n**Cost: confirmed** \u2014 GB-s per successful request 2.593 \u2192 1.092, and the two treatments' replicate ranges do not overlap.\n**Goodput: not established** \u2014 1.26\u00d7 mean, but ranges overlap (B2 355.0/s is worse than A2 411.1/s). A single A1-vs-B1 pair showed 1.90\u00d7 and would have supported a claim the full ordering dissolves.\n\n**The two bar panels are the verdict.** Read them first: cost separates cleanly by treatment, goodput does not. Everything below them is mechanism.\n\n**Reading the time series.** Lines break where no data exists \u2014 Lambda publishes metrics only while invoked, so the long empty stretches are the recovery gates between arms, which were genuinely idle. They are gaps, not zeros and not declines. The gate after the control arm needed 3 probes and ~8 minutes to clear; each breaker arm needed 1.\n\n\u26a0 **The billed-duration distribution panel is absent by necessity.** It read from Logs Insights over `/aws/lambda/lra-database-resilience`, deleted with the stack at teardown. Its percentiles (control p50 199 ms / p95 13,529 ms vs breaker p50 23 ms / p95 397 ms) survive in `loadtest/results/`. CloudWatch *metrics* persist and are unaffected \u2014 every panel here resolves against deleted resources."
+      }
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "VERDICT \u2014 cost per successful request (lower is better)",
+      "description": "GB-seconds consumed per HTTP 200 returned. Both control arms are worse than both breaker arms, so the ranges do not overlap and the cost effect survives the A-B-B-A ordering control.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "grafanacloud-infinity"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "grafanacloud-infinity"
+          },
+          "type": "json",
+          "source": "inline",
+          "format": "table",
+          "data": "[{\"arm\": \"A1 control\", \"Control\": 3.265, \"Breaker\": null, \"gControl\": 256.4, \"gBreaker\": null}, {\"arm\": \"B1 breaker\", \"Control\": null, \"Breaker\": 1.019, \"gControl\": null, \"gBreaker\": 486.7}, {\"arm\": \"B2 breaker\", \"Control\": null, \"Breaker\": 1.165, \"gControl\": null, \"gBreaker\": 355.0}, {\"arm\": \"A2 control\", \"Control\": 1.92, \"Breaker\": null, \"gControl\": 411.1, \"gBreaker\": null}]",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "arm",
+              "text": "Arm",
+              "type": "string"
+            },
+            {
+              "selector": "Control",
+              "text": "Control",
+              "type": "number"
+            },
+            {
+              "selector": "Breaker",
+              "text": "Breaker",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 85,
+            "gradientMode": "none",
+            "axisPlacement": "auto"
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Control"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Breaker"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "Arm",
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "VERDICT \u2014 goodput (higher is better)",
+      "description": "Successful responses per second at a fixed 1,600 rps offered. B2 (355.0) is worse than A2 (411.1), so the ranges OVERLAP and the goodput half of the prediction is not established at n=2.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "grafanacloud-infinity"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "grafanacloud-infinity"
+          },
+          "type": "json",
+          "source": "inline",
+          "format": "table",
+          "data": "[{\"arm\": \"A1 control\", \"Control\": 3.265, \"Breaker\": null, \"gControl\": 256.4, \"gBreaker\": null}, {\"arm\": \"B1 breaker\", \"Control\": null, \"Breaker\": 1.019, \"gControl\": null, \"gBreaker\": 486.7}, {\"arm\": \"B2 breaker\", \"Control\": null, \"Breaker\": 1.165, \"gControl\": null, \"gBreaker\": 355.0}, {\"arm\": \"A2 control\", \"Control\": 1.92, \"Breaker\": null, \"gControl\": 411.1, \"gBreaker\": null}]",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "arm",
+              "text": "Arm",
+              "type": "string"
+            },
+            {
+              "selector": "gControl",
+              "text": "Control",
+              "type": "number"
+            },
+            {
+              "selector": "gBreaker",
+              "text": "Breaker",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 85,
+            "gradientMode": "none",
+            "axisPlacement": "auto"
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Control"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Breaker"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "Arm",
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Billed occupancy \u2014 the cost mechanism",
-      "description": "Control arms sit in HikariCP borrow-wait until the 10s pool timeout or the 29s Lambda timeout, and every second is billed. Breaker arms refuse in milliseconds. Log scale.",
+      "description": "Control arms sit in HikariCP borrow-wait until the 10s pool timeout or the 29s function timeout, and every second is billed. Breaker arms refuse in milliseconds.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 23,
         "w": 12,
         "h": 9
       },
@@ -145,14 +361,14 @@
       "id": 3,
       "type": "timeseries",
       "title": "Who sheds \u2014 platform throttling vs application shedding",
-      "description": "Breaker arms show MORE invocations and FEWER throttles. Shedding fast drains concurrency, which stops the platform throttling, which lets more requests reach code that can answer them.",
+      "description": "Breaker arms show MORE invocations and FEWER throttles: fast sheds drain concurrency, drained concurrency stops platform throttling, so more requests reach code that can answer them.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 23,
         "w": 12,
         "h": 9
       },
@@ -252,15 +468,15 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Aurora saturation \u2014 DBLoad vs 1 vCPU",
-      "description": "The instance presents 1 vCPU at 2 ACUs, so this number IS the oversubscription factor. Note the Average and AAS/vCPU series are numerically identical \u2014 that IS the proof the divisor is 1 (PHASE_0 \u00a7III). Instantaneous peaks: control 253 and 311, breaker 232 and 225. Saturated in both arms, which is the point.",
+      "title": "Aurora saturation \u2014 DBLoad vs the 1 vCPU line",
+      "description": "LOG SCALE, so the y=1.0 saturation line is actually visible \u2014 on a linear axis against peaks of 311 it sat indistinguishably on the floor. The instance presents 1 vCPU at 2 ACUs, so this number IS the oversubscription factor. Peaks: control 253 and 311, breaker 232 and 225.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 32,
         "w": 12,
         "h": 9
       },
@@ -277,6 +493,10 @@
             "insertNulls": 180000,
             "thresholdsStyle": {
               "mode": "line"
+            },
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
             }
           },
           "color": {
@@ -388,14 +608,14 @@
       "id": 5,
       "type": "timeseries",
       "title": "Pool queueing \u2014 RDS Proxy borrow latency",
-      "description": "Pressure appears as queueing, not as connection count: connections moved only 214 to 232 across a 200-to-900 reservation change while borrow latency moved three orders of magnitude. Connections are on the RIGHT axis in count units \u2014 they are not microseconds.",
+      "description": "Pressure appears as queueing, not as connection count: connections moved only 214 to 232 across a 200-to-900 reservation change while borrow latency moved three orders of magnitude. Connections are on the RIGHT axis in counts.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 12,
-        "y": 25,
+        "y": 32,
         "w": 12,
         "h": 9
       },
@@ -548,14 +768,14 @@
       "id": 6,
       "type": "timeseries",
       "title": "Admission limit \u2014 ConcurrentExecutions pinned at 900",
-      "description": "Reserved concurrency 900 in every arm. This is what makes the arms comparable \u2014 and, per the knee finding, what determines where the knee sits at all.",
+      "description": "Reserved concurrency 900 in every arm \u2014 what makes the arms comparable, and what determines where the knee sits at all.",
       "datasource": {
         "type": "cloudwatch",
         "uid": "efk64tufw3pj4e"
       },
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 41,
         "w": 24,
         "h": 8
       },
@@ -644,7 +864,7 @@
         },
         "enable": true,
         "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
+        "iconColor": "rgba(0,211,255,1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
       },

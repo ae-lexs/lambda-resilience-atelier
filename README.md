@@ -66,11 +66,11 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 >
 > ![Goodput collapse under the staircase ramp — invocations peaking near 69K per minute then crashing to about 2K while errors climb, with throttles appearing only in the final minutes](assets/grafana/phase0-goodput-collapse.png)
 >
-> *Goodput collapse. Invocations (green, left axis) peak near 69K/min, crash to ~2K while errors (yellow, right axis) climb, then partially recover. Throttles (blue) appear only in the final minutes — the account-concurrency confound is confined to the last stage, so the collapse itself is database-attributable.*
+> *Goodput collapse. Invocations (green, left axis) peak at **69.1K/min** at 02:49 and crash to **1.7K** one minute later, while errors (orange, right axis) climb to **2.23K/min**. Throttles (purple) hold at zero until 02:53 — the account-concurrency confound is confined to the top of the ramp, so the collapse itself is database-attributable. Errors and throttles carry their own axis because they are ~45× smaller than invocations; sharing one axis flattens the two series that carry the argument.*
 >
 > ![Latency distribution across three identical bursts — max falling from 18.1 s on the first burst to a 2.5 s residual to flat](assets/grafana/phase0-warmup-decay.png)
 >
-> *The warm-up transient. Three identical bursts on the same stack: max duration 18.1 s on the first burst after cluster creation, a 2.5 s residual on the second, and flat by the third. Same load, same code — the difference is entirely how recently the cluster was created. This is why the standing protocol is to discard the first burst after any deploy.*
+> *The warm-up transient, on a log axis. Identical bursts on the same stack, minutes apart: `Duration` max reaches **18.1 s** on the first burst after cluster creation (01:45) and only **~2.5 s** on the repeat (02:19), while average duration falls from 296 ms to the low tens of ms. Same load, same code — the difference is entirely how recently the cluster was created. This is why the standing protocol is to discard the first burst after any deploy.*
 >
 > **Retracted flag.** An earlier revision of this note also flagged [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production). That was an error and is withdrawn: LRA-06 was measured on the **M04 stack driving `/health`**, which involves no database at all, so an Aurora warm-up transient cannot explain it. Its bimodality has its own instrumented mechanism — PC spillover past 200,000 invocations, shown in its own exhibit. The flag was raised by generalizing an M05-stack finding onto an M04-stack claim without checking which stack produced it. Recorded rather than quietly deleted, because a citable study should show where its own review went wrong.
 >
@@ -191,9 +191,6 @@ Java 21 + Spring Boot 3.5 cold start landed at **4,623 ms** — more than double
 
 Attaching the ADOT Java agent layer added **≈ 4,200 ms** to cold start (4.6 s → 8.8 s) and nearly doubled memory (**182 MB → 313 MB** at a 1024 MB allocation). The instrumentation is the cost paid for visibility — and that visibility is what makes every later delta in this study reproducible and honestly comparable. But "free observability" is a false framing: you buy it with cold-start budget and memory.
 
-![M02 observability dashboard — Init Duration, Invocation Duration p50/p95/p99, Concurrent Executions, Error Rate](assets/grafana/m02-observability-dashboard.png)
-
-*The M02 Grafana dashboard, fed by ADOT → CloudWatch. Top-left: Init Duration for cold starts clustering at 7–9 s. Top-right: warm Invocation Duration percentiles (p50 ≈ 579 ms). Bottom row: concurrent executions and error rate. This dashboard is the measurement backbone for every subsequent module. **Exhibit from the pre-2026-07-20 apparatus** — instrument unchanged by the Phase-0 re-baseline; the stack it was captured from is torn down, so it is retained rather than regenerated.*
 
 > **Verdict: Corrected.** Instrumentation carries a quantifiable cold-start and memory tax. Anyone budgeting for a chaos-validated workload should also read [LRA-08](#lra-08--adot-and-fis-cannot-instrument-the-same-function) — choosing ADOT has a second, architectural cost.
 
@@ -203,9 +200,6 @@ Attaching the ADOT Java agent layer added **≈ 4,200 ms** to cold start (4.6 s 
 
 The Firecracker microVM snapshot cuts restored cold start from ≈ 9 s (with ADOT) to **737 ms cache-warm** and **1,703 ms on the first cache-cold restore**, with the actual handler running in 58–62 ms inside the restore window. Snapshot *capture* is a one-time **12–13 s** cost at publish (often two snapshots per version due to multi-AZ replication), amortized over every subsequent restore. CRaC `beforeCheckpoint` / `afterRestore` hooks are mandatory for any state the snapshot would otherwise freeze incorrectly — open connections, IAM tokens, cached DNS.
 
-![M03 SnapStart dashboard — Restore Duration vs Billed Restore Duration, and warm Invocation Duration in the low hundreds of ms](assets/grafana/m03-snapstart-dashboard.png)
-
-*Restore Duration (top-left: `restoreMs` vs `billedRestoreMs`) replaces Init Duration as the cold-start metric under SnapStart. Note the Invocation Duration panel (top-right) now tops out near 175 ms rather than the ~1,700 ms of M02 — the restore path is an order of magnitude cheaper than a full JVM init. **Exhibit from the pre-2026-07-20 apparatus** — instrument unchanged by the Phase-0 re-baseline; the stack it was captured from is torn down, so it is retained rather than regenerated.*
 
 > **Verdict: Nuanced.** SnapStart works, but "low-hundreds-of-ms restore" only holds for cache-warm restores; the *first* cache-cold restore is ≈ 1.7 s, and capture is a real up-front cost. Use SnapStart alone when 1.7 s meets the latency contract; escalate otherwise.
 
@@ -215,9 +209,6 @@ The Firecracker microVM snapshot cuts restored cold start from ≈ 9 s (with ADO
 
 With 2 PC × 1024 MB, cold start is **eliminated under burst** at a standing cost of **$0.72/day**. Application Auto Scaling makes PC sizing dynamic — schedule-based for known peaks, metric-based on `ProvisionedConcurrencyUtilization` for unknown ones. The decision criterion is mechanical: use PC when worst-case burst cold start exceeds the latency contract; use SnapStart alone when its restore time is already below it.
 
-![M04 Provisioned Concurrency Spillover — the AWS/Lambda ProvisionedConcurrencySpilloverInvocations metric with Match Exact enabled](assets/grafana/m04-provisioned-concurrency-spillover.png)
-
-*The instrument for PC: `ProvisionedConcurrencySpilloverInvocations` from the `AWS/Lambda` namespace, scoped by `FunctionName` + `Resource` alias with **Match Exact** on. Spillover — invocations that overflowed the provisioned pool and fell back to on-demand cold starts — is the signal that PC is undersized. Under this module's steady load it stays near zero; [LRA-06](#lra-06--single-invocation-benchmarks-misrepresent-production) shows what it does under a real burst. **Exhibit from the pre-2026-07-20 apparatus** — instrument unchanged by the Phase-0 re-baseline; the stack it was captured from is torn down, so it is retained rather than regenerated.*
 
 > **Verdict: Confirmed.** PC eliminates cold start deterministically. The trade is money for latency certainty, and the trade is legible on a single panel.
 
@@ -227,20 +218,10 @@ With 2 PC × 1024 MB, cold start is **eliminated under burst** at a standing cos
 
 Connection exhaustion is the second fail-slow mode, and it is orthogonal to compute sizing. Aurora Serverless v2 at 1 ACU has a **≈ 188-connection ceiling**; 1,000 concurrent Lambda invocations each opening one connection saturate it instantly. This is **Little's Law** (`L = λ × W`): concurrency on the database = invocation rate × time-in-system, so 1,000 in-flight invocations is an `L` that blows straight past the ~188 ceiling — and the connection *count* is capped and therefore blind above it, exactly as CRA-04 found on its pool. The true saturation signal is the **queue for a pooled connection** (RDS Proxy `DatabaseConnectionsBorrowLatency`), not the count. **RDS Proxy** multiplexes many client connections onto a small Aurora pool. The IAM-token-via-proxy pattern carries a subtle mechanism requirement: because SnapStart freezes the token in the snapshot, the token **must be refreshed on every pool borrow**, not once at init — discovered by failed deploys, not by documentation.
 
-![Pool saturation — the proxy-scoped connection allowance flat at 161 with connections in use climbing toward it, while BorrowLatency has already spiked to 27.7 s](assets/grafana/phase0-pool-saturation.png)
+![Pool saturation with both connection scopes plotted — Aurora-scoped connections peaking at 322, the proxy-scoped series about half that at 161, the flat proxy limit line, and borrow latency spiking to 27.7 s on a log axis](assets/grafana/phase0-pool-saturation.png)
 
-*The corrected instrument (2026-07-20 apparatus). `MaxDatabaseConnectionsAllowed` (orange) is flat at 161 and connections in use (blue) climb toward it — but `BorrowLatency` (yellow) has already spiked to **27.7 s** at 02:50, two minutes **before** connections touch that line at 02:52. The queue saturates first; the count saturates last. That ordering is the whole argument for reading pool-wait rather than pool-occupancy, and it is why the count is described above as blind.*
+*Re-rendered 2026-08-04 with the §XII scope correction **drawn rather than described**. Three connection series are now plotted together on the right axis: Aurora's own count (blue, peak **322**), the proxy-scoped count (orange, peak **161** — about half), and the flat proxy per-scope limit (red, **161**). The blue line sits **above** the red line for most of the window, which is the whole point: 161 was never the database's ceiling. Meanwhile borrow latency (left, log µs) reaches **27.7 s max at 02:50**, two minutes **before** the proxy count touches its limit at 02:52. The queue saturates first, the count saturates last, and the count was also scoped to the wrong entity. That ordering is the argument for reading pool-wait rather than pool-occupancy.*
 
-> [!warning] Read 161 as a proxy scope limit, not a database ceiling
-> The orange line in this exhibit is `MaxDatabaseConnectionsAllowed` **dimensioned by `{ProxyName}`** — an RDS Proxy per-scope limit. Aurora's own `DatabaseConnections{DBInstanceIdentifier}` peaked at **324** over the same window, and `DBLoad` of 312 active sessions corroborates the Aurora figure (312 sessions cannot exist across 161 connections). **161 is retired as a connection ceiling.** The ordering argument the exhibit is here to make — queue first, count second — is unaffected, because it concerns *when* each signal moves, not the absolute value of either. A metric name published under several dimension sets is not one metric; it is several, and they can disagree by 2× while each is correct for its own scope.
-
-<details><summary>Superseded exhibit — the count-based instrument (pre-2026-07-20 apparatus)</summary>
-
-![M05 database-resilience dashboard — Errors, 5xx, Aurora Capacity Units, and Aurora Connection Count](assets/grafana/m05-database-resilience-dashboard.png)
-
-*Retained for the record. Bottom row: Aurora Capacity Unit (left, stepping 0.5 → 1.0 ACU) and Aurora Connection Count (right, climbing to ≈ 148). The ≈148 figure is the one now in question — with `minimum-idle=2` per container, ~74 warm containers produce ~148 idle connections at Spring startup without any request touching the database.*
-
-</details>
 
 > **Verdict: Confirmed, with a mechanism correction.** The ceiling is real and compute sizing does not touch it; the SnapStart-plus-IAM-token interaction requires per-borrow refresh, which no single doc page states.
 
@@ -250,9 +231,6 @@ Connection exhaustion is the second fail-slow mode, and it is orthogonal to comp
 
 Across **342,872 invocations** under the burst, throughput hit **4,283 req/s** with **p95 = 110 ms but max = 24,690 ms — a 224× ratio**. The system is **bimodal**: warm invocations cluster near the median while cold-starting containers form a long upper tail. A single-invocation benchmark sees only the warm mode and systematically understates user-facing impact.
 
-![M06 burst-load result — Concurrent Executions ramping to 500, PC Utilization saturating at 1.0, and PC Spillover climbing past 200,000 invocations](assets/grafana/m06-burst-load-result.png)
-
-*The burst regime. Top-left: Concurrent Executions ramping to 500 VUs. Bottom-left: Provisioned Concurrency Utilization saturating at 1.0 — the provisioned pool is fully consumed. Bottom-right: PC Spillover climbing past 200,000 — every invocation beyond the pool takes an on-demand cold start. This is the bimodality of [LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime) reproduced at scale. **Exhibit from the pre-2026-07-20 apparatus** — instrument unchanged by the Phase-0 re-baseline; the stack it was captured from is torn down, so it is retained rather than regenerated.*
 
 > **Verdict: Corrected.** Production latency is bimodal under burst. The k6 `stages` API and a multi-threshold validation structure are not optional; single-invocation numbers are not evidence.
 
@@ -292,6 +270,14 @@ Paired by treatment, with replicate **ranges** stated because n = 2 per arm does
 | GB-s per success | 2.593 [1.920 – 3.265] | 1.092 [1.019 – 1.165] | **0.42×** | **separate** |
 | Total GB-seconds | 146,368 | 81,853 | 0.56× | **separate** |
 | Goodput | 333.8/s [256.4 – 411.1] | 420.9/s [355.0 – 486.7] | 1.26× | **overlap** |
+
+![Horizontal bar chart of GB-seconds per successful request by arm — both breaker arms at about 1.0 and 1.2, both control arms at 1.9 and 3.3, with no overlap between treatments](assets/grafana/xiii-verdict-cost.png)
+
+*The confirmed half, and the reason it is confirmed. Both breaker arms (green, 1.02 and 1.17) sit below both control arms (red, 1.92 and 3.27). The treatments separate cleanly, so the cost effect is not an artifact of which arm ran when.*
+
+![Horizontal bar chart of goodput by arm — B1 highest at 487 req/s, then A2 at 411, then B2 at 355, then A1 at 256, with treatments interleaved](assets/grafana/xiii-verdict-goodput.png)
+
+*The half that failed, drawn so it cannot be glossed. The bars **interleave**: B2 (green, 355 req/s) is beaten by A2 (red, 411 req/s). Comparing only the best breaker arm against the worst control arm gives 1.90× and looks like a result; the full ordering gives 1.26× with overlapping ranges and does not support the claim. This chart is in the study because the temptation to report the first comparison is exactly what the A-B-B-A design exists to defeat.*
 
 ![Billed occupancy across the four arms — control arms averaging seconds per invocation, breaker arms averaging hundreds of milliseconds, on a log scale](assets/grafana/xiii-billed-occupancy.png)
 

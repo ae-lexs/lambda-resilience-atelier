@@ -1,0 +1,556 @@
+{
+  "uid": "lra-phase0-lra05",
+  "title": "LRA \u2014 Phase 0 / LRA-05 exhibits (2026-07-20)",
+  "tags": [
+    "lambda-resilience-atelier",
+    "phase-0",
+    "lra-05"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "2026-07-21T02:44:00.000Z",
+    "to": "2026-07-21T02:58:00.000Z"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Goodput collapse \u2014 the staircase ramp (2026-07-20)",
+      "description": "Invocations on the LEFT axis, errors and throttles on the RIGHT. They differ by ~45x in magnitude, so a shared axis flattens the two series that carry the argument. Throttles appear only at the top of the ramp, which is what makes the collapse database-attributable rather than a Lambda-tier artifact.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "insertNulls": 180000
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors / min"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "errors / throttles per min"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Throttles / min"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "errors / throttles per min"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Invocations / min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Invocations",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Invocations / min"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Errors",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Errors / min"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Throttles",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Throttles / min"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Pool saturation \u2014 CORRECTED to the Aurora-scoped connection series",
+      "description": "PHASE_0 SXII correction drawn rather than described: the Aurora-scoped series sits roughly 2x above the proxy-scoped one, and the flat 161 line is the proxy's own per-scope limit, not the database's capacity. Borrow latency (left, log us) crosses four orders of magnitude before any connection line is approached.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Aurora connections (authoritative)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "connections"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Proxy-scoped connections (undercounts ~2x)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "connections"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Proxy per-scope limit (161 - NOT a DB ceiling)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "connections"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Borrow latency avg"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnectionsBorrowLatency",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Borrow latency max"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "lradatabaseresiliencestack-aurorawriterdc5bc759-bzuvtxntvk0r"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Aurora connections (authoritative)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Proxy-scoped connections (undercounts ~2x)"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/RDS",
+          "metricName": "MaxDatabaseConnectionsAllowed",
+          "dimensions": {
+            "ProxyName": [
+              "lra-rds-proxy"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Proxy per-scope limit (161 - NOT a DB ceiling)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Warm-up transient \u2014 three identical bursts, decaying tail",
+      "description": "Same offered load, same code, three times in a row on a cluster that is progressively warmer. The 18.1 s tail on the first burst after cluster creation decays to nothing by the third.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "efk64tufw3pj4e"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "insertNulls": 180000,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Duration max"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efk64tufw3pj4e"
+          },
+          "namespace": "AWS/Lambda",
+          "metricName": "Duration",
+          "dimensions": {
+            "FunctionName": [
+              "lra-database-resilience"
+            ]
+          },
+          "statistic": "Average",
+          "period": "60",
+          "region": "default",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "matchExact": true,
+          "id": "",
+          "expression": "",
+          "label": "Duration avg"
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0,211,255,1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  }
+}
