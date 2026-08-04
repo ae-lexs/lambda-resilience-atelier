@@ -48,7 +48,7 @@ Each claim has a stable identifier (`LRA-NN`) so it can be cited directly. Follo
 | ID | Claim under test | Prevailing assumption / prediction | Measured result | Verdict |
 |---|---|---|---|---|
 | [LRA-01](#lra-01--baseline-cold-start-is-not-predictable-from-the-runtime) | A Java Lambda's cold start can be estimated from JVM + framework version | 1.3–2.2 s (committed in §6) | **4,623 ms** | **Corrected** |
-| [LRA-02](#lra-02--observability-is-not-free) | Distributed-tracing instrumentation is effectively free | Negligible overhead | **+4,200 ms** cold start, **+131 MB** | **Corrected** |
+| [LRA-02](#lra-02--observability-is-not-free) | Distributed-tracing instrumentation is effectively free | Negligible overhead | **+4,200 ms** cold start, **+131 MB** — and the init phase is **billed** | **Corrected** |
 | [LRA-03](#lra-03--snapstart-is-the-cheap-but-incomplete-default) | SnapStart restores a Java Lambda in the low hundreds of ms | Sub-second restore | 737 ms warm · **1,703 ms** first cache-cold | **Nuanced** |
 | [LRA-04](#lra-04--provisioned-concurrency-is-the-deterministic-eliminator) | Provisioned Concurrency eliminates cold start under burst | Eliminated, at a standing cost | Eliminated under 0→500 VU · **$0.72/day** | **Confirmed** |
 | [LRA-05](#lra-05--a-right-sized-function-still-fails-on-a-downstream-ceiling) | A right-sized function cannot fail on a downstream limit | Compute sizing is the whole story | Aurora **≈188-conn** ceiling at 1 ACU saturates instantly | **Confirmed** + mechanism · **⚠ under re-measurement** |
